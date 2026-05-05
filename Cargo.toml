@@ -1,0 +1,41 @@
+[package]
+name = "delp"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+description = "Delp — production-grade erasure-coding FEC protocol library for lossy networks, written in pure Rust"
+repository = "https://github.com/example/delp"
+keywords = ["fec", "erasure-coding", "network-coding", "forward-error-correction"]
+categories = ["network-programming", "algorithms"]
+
+[features]
+default = ["std"]
+std = ["thiserror/std", "bytes/std"]
+async = ["std", "dep:tokio", "dep:futures-core", "dep:futures-sink", "dep:futures-util"]
+
+[dependencies]
+bytes     = { version = "1", default-features = false }
+smallvec  = { version = "1", features = ["const_generics", "union"] }
+thiserror = { version = "2", default-features = false }
+tracing   = { version = "0.1", default-features = false }
+zerocopy  = { version = "0.8", default-features = false, features = ["derive"] }
+
+tokio        = { version = "1", features = ["sync","time","macros"], optional = true }
+futures-core = { version = "0.3", default-features = false, optional = true }
+futures-sink = { version = "0.3", default-features = false, optional = true }
+futures-util = { version = "0.3", features = ["sink"], optional = true }
+
+[dev-dependencies]
+proptest     = "1"
+criterion    = { version = "0.5", features = ["html_reports"] }
+tokio        = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+[[bench]]
+name    = "gf_bench"
+harness = false
+
+[[bench]]
+name    = "codec_bench"
+harness = false
