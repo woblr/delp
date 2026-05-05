@@ -1,6 +1,6 @@
 pub mod gf2_4;
 pub mod gf2_8;
-pub(crate) mod simd;
+pub mod simd;
 pub(crate) mod tables;
 
 pub use gf2_4::Gf2_4;

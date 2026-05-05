@@ -101,9 +101,12 @@ pub mod wire;
 pub mod policy;
 pub mod codec;
 
+#[cfg(feature = "async")]
+pub mod transport;
+
 // ── Top-level convenience re-exports ─────────────────────────────────────
 
-pub use config::{EncoderConfig, DecoderConfig, Field, BackpressureMode};
+pub use config::{EncoderConfig, DecoderConfig, Field, BackpressureMode, MatrixStrategy};
 pub use error::{DelpError, Result};
 
 pub use codec::{

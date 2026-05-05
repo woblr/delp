@@ -6,17 +6,17 @@ use tracing::{debug, trace};
 
 use crate::config::{EncoderConfig, BackpressureMode, Field};
 use crate::error::{Result, DelpError};
-use crate::gf::simd::ops::{mul_acc_gf2_8, mul_acc_gf2_4};
 use crate::policy::{
     WindowPolicy, CongestionControl, FecRateController,
     ReceiverAckState, ReceiverId, EncoderState,
 };
 use crate::config::MatrixStrategy;
+use crate::gf::simd::{dispatch, gf2_8_tbl, gf2_4_tbl, mul_acc_raw};
 use crate::wire::{
     feedback::FeedbackPacket,
     source::SourcePacket,
     coded::CodedPacket,
-    ev::{EncodingVector, coef_gen::{vandermonde_batch, cauchy_batch_gf2_8}},
+    ev::{EncodingVector, coef_gen::{vandermonde_batch, cauchy_batch_gf2_8, cauchy_batch_gf2_4}},
 };
 use window::EncodingWindow;
 
@@ -156,7 +156,10 @@ where
     /// | Cauchy      | GF(2⁸) |  128  |
     pub fn coded_id_limit(&self) -> u32 {
         match self.config.matrix_strategy {
-            MatrixStrategy::Cauchy => 128,
+            MatrixStrategy::Cauchy => match self.config.field {
+                Field::Gf2_8 => 128, // 0..=127
+                Field::Gf2_4 => 7,   // 0..=6
+            },
             MatrixStrategy::Vandermonde => match self.config.field {
                 Field::Gf2_8 => 254, // 1..=254; 0 and 255 are degenerate
                 Field::Gf2_4 => 14,  // 1..=14
@@ -219,12 +222,14 @@ where
                 (c, e)
             }
             MatrixStrategy::Cauchy => {
-                // coded_ids_used guard above ensures coded_id < 128 and field = GF(2^8)
-                debug_assert_eq!(self.config.field, Field::Gf2_8,
-                    "Cauchy matrix requires GF(2^8) — enforced by builder");
-                debug_assert!(coded_id < 128,
+                // coded_ids_used guard above ensures coded_id is within safe range.
+                // Builder enforces field=GF(2^8)→limit 128, field=GF(2^4)→limit 7.
+                debug_assert!(coded_id < self.coded_id_limit(),
                     "coded_id {coded_id} exceeds Cauchy limit — enforced by guard");
-                let c = cauchy_batch_gf2_8(&source_ids, coded_id);
+                let c = match self.config.field {
+                    Field::Gf2_8 => cauchy_batch_gf2_8(&source_ids, coded_id),
+                    Field::Gf2_4 => cauchy_batch_gf2_4(&source_ids, coded_id),
+                };
                 // Encode coefficients explicitly — the receiver has no formula
                 // to re-derive Cauchy coefs from (src_id, coded_id) alone.
                 let e = EncodingVector::explicit(
@@ -280,23 +285,29 @@ where
 
     /// Compute the coded payload: `sum over window of (coef_i * symbol_i)`.
     ///
-    /// Uses SIMD multiply-accumulate; the `scratch` buffer is reused across
-    /// calls to avoid per-packet heap allocation.
+    /// Hoists the SIMD dispatch check and nibble-table pointer out of the
+    /// inner loop so they are resolved exactly once per coded packet rather
+    /// than once per source symbol.
     fn compute_coded_payload(&mut self, _source_ids: &[u32], coefs: &[u8]) -> Vec<u8> {
-        let sz = self.config.symbol_size;
+        let sz   = self.config.symbol_size;
+        let disp = dispatch();
         self.scratch.fill(0);
 
         match self.config.field {
             Field::Gf2_8 => {
+                let tbl = gf2_8_tbl();
                 for (sym, &coef) in self.window.symbols().iter().zip(coefs.iter()) {
                     debug_assert_eq!(sym.data.len(), sz);
-                    mul_acc_gf2_8(&mut self.scratch, &sym.data, coef);
+                    if coef == 0 { continue; }
+                    mul_acc_raw(&mut self.scratch, &sym.data, &tbl[coef as usize], disp);
                 }
             }
             Field::Gf2_4 => {
+                let tbl = gf2_4_tbl();
                 for (sym, &coef) in self.window.symbols().iter().zip(coefs.iter()) {
                     debug_assert_eq!(sym.data.len(), sz);
-                    mul_acc_gf2_4(&mut self.scratch, &sym.data, coef);
+                    if coef == 0 { continue; }
+                    mul_acc_raw(&mut self.scratch, &sym.data, &tbl[coef as usize], disp);
                 }
             }
         }
@@ -419,9 +430,58 @@ mod tests {
         for _ in 0..4 {
             enc.submit_source(Bytes::from(vec![0xFFu8; 128])).unwrap();
         }
-        if let Some(EncoderOutput::Coded(pkt)) = enc.generate_coded() {
-            // payload is at the end of the packet — we just check it's there
+        if let Ok(Some(EncoderOutput::Coded(pkt))) = enc.generate_coded() {
             assert!(!pkt.is_empty());
         }
+    }
+
+    /// coded_id space exhausts after exactly `coded_id_limit()` packets.
+    #[test]
+    fn coded_id_exhaustion_returns_error() {
+        // Vandermonde GF(2^8) limit = 254
+        let cfg = EncoderConfig::builder(8)
+            .window_capacity(32)
+            .fec_rate(0, 1)
+            .build()
+            .unwrap();
+        let mut enc = DefaultEncoder::with_defaults(cfg);
+        // Push one source so the window is non-empty
+        enc.submit_source(Bytes::from(vec![0xABu8; 8])).unwrap();
+
+        let limit = enc.coded_id_limit();
+        // Generate exactly `limit` coded packets — all should succeed
+        for i in 0..limit {
+            enc.generate_coded()
+                .unwrap_or_else(|e| panic!("packet {i} failed: {e}"))
+                .expect("window should be non-empty");
+        }
+        // The very next call must return CodedIdExhausted
+        assert!(matches!(
+            enc.generate_coded(),
+            Err(DelpError::CodedIdExhausted { .. })
+        ), "expected CodedIdExhausted after {limit} packets");
+    }
+
+    /// Cauchy strategy exhausts after exactly 128 coded packets.
+    #[test]
+    fn cauchy_coded_id_exhaustion() {
+        let cfg = EncoderConfig::builder(8)
+            .window_capacity(32)
+            .matrix_strategy(crate::config::MatrixStrategy::Cauchy)
+            .fec_rate(0, 1)
+            .build()
+            .unwrap();
+        let mut enc = DefaultEncoder::with_defaults(cfg);
+        enc.submit_source(Bytes::from(vec![0x42u8; 8])).unwrap();
+
+        for i in 0..128u32 {
+            enc.generate_coded()
+                .unwrap_or_else(|e| panic!("Cauchy packet {i} failed: {e}"))
+                .expect("window non-empty");
+        }
+        assert!(matches!(
+            enc.generate_coded(),
+            Err(DelpError::CodedIdExhausted { .. })
+        ), "Cauchy: expected exhaustion after 128 packets");
     }
 }

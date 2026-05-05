@@ -73,17 +73,39 @@ static GF2_8_TBL: OnceLock<Box<[NibbleTables; 256]>> = OnceLock::new();
 static GF2_4_TBL: OnceLock<Box<[NibbleTables; 256]>> = OnceLock::new();
 
 #[inline]
-fn gf2_8_tbl() -> &'static [NibbleTables; 256] {
+pub(crate) fn gf2_8_tbl() -> &'static [NibbleTables; 256] {
     GF2_8_TBL.get_or_init(|| {
         Box::new(std::array::from_fn(|c| NibbleTables::for_gf2_8(c as u8)))
     })
 }
 
 #[inline]
-fn gf2_4_tbl() -> &'static [NibbleTables; 256] {
+pub(crate) fn gf2_4_tbl() -> &'static [NibbleTables; 256] {
     GF2_4_TBL.get_or_init(|| {
         Box::new(std::array::from_fn(|c| NibbleTables::for_gf2_4(c as u8)))
     })
+}
+
+/// Low-level accumulate using a pre-resolved dispatch and pre-fetched table.
+///
+/// Call this in tight loops where the caller holds the table ref and dispatch
+/// value for the entire loop — avoids repeating the OnceLock dereference on
+/// every iteration.
+///
+/// # Safety
+/// Caller must ensure dst.len() == src.len().
+#[inline]
+pub(crate) fn mul_acc_raw(
+    dst:      &mut [u8],
+    src:      &[u8],
+    t:        &NibbleTables,
+    dispatch: Dispatch,
+) {
+    match dispatch {
+        Dispatch::Avx2   => unsafe { avx2_mul_acc(dst, src, t) },
+        Dispatch::Ssse3  => unsafe { ssse3_mul_acc(dst, src, t) },
+        Dispatch::Scalar => scalar_mul_acc(dst, src, t),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -91,12 +113,12 @@ fn gf2_4_tbl() -> &'static [NibbleTables; 256] {
 // ═══════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Dispatch { Avx2, Ssse3, Scalar }
+pub(crate) enum Dispatch { Avx2, Ssse3, Scalar }
 
 static DISPATCH: OnceLock<Dispatch> = OnceLock::new();
 
 #[inline]
-fn dispatch() -> Dispatch {
+pub(crate) fn dispatch() -> Dispatch {
     *DISPATCH.get_or_init(|| {
         if is_x86_feature_detected!("avx2")  { return Dispatch::Avx2; }
         if is_x86_feature_detected!("ssse3") { return Dispatch::Ssse3; }
@@ -248,59 +270,94 @@ unsafe fn ssse3_mul_scale(dst: &mut [u8], t: &NibbleTables) {
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_mul_acc(dst: &mut [u8], src: &[u8], t: &NibbleTables) {
     use std::arch::x86_64::*;
-    let lo128 = _mm_loadu_si128(t.lo.as_ptr() as *const __m128i);
-    let hi128 = _mm_loadu_si128(t.hi.as_ptr() as *const __m128i);
+    let lo128   = _mm_loadu_si128(t.lo.as_ptr() as *const __m128i);
+    let hi128   = _mm_loadu_si128(t.hi.as_ptr() as *const __m128i);
     let lo_tbl  = _mm256_broadcastsi128_si256(lo128);
     let hi_tbl  = _mm256_broadcastsi128_si256(hi128);
     let mask_0f = _mm256_set1_epi8(0x0F_u8 as i8);
 
-    let chunks = dst.len() / 32;
-    let rem    = dst.len() % 32;
+    // ── 2× unrolled main loop: 64 bytes per iteration ────────────────
+    //
+    // Two independent load→nibble-split→shuffle→xor→store chains let
+    // the CPU's out-of-order engine overlap them: while chain A waits
+    // on vpshufb (~5 cycles), chain B's loads are already in flight.
+    let unrolled = dst.len() / 64;
+    let rem      = dst.len() % 64;
 
-    for i in 0..chunks {
-        let off = i * 32;
-        let inp = _mm256_loadu_si256(src[off..].as_ptr() as *const __m256i);
-        let lo_n = _mm256_and_si256(inp, mask_0f);
-        let hi_n = _mm256_and_si256(_mm256_srli_epi16(inp, 4), mask_0f);
-        let prod = _mm256_xor_si256(
-            _mm256_shuffle_epi8(lo_tbl, lo_n),
-            _mm256_shuffle_epi8(hi_tbl, hi_n),
+    for i in 0..unrolled {
+        let off = i * 64;
+
+        // Chain A — bytes [off .. off+32]
+        let inp_a  = _mm256_loadu_si256(src[off..].as_ptr() as *const __m256i);
+        let lo_a   = _mm256_and_si256(inp_a, mask_0f);
+        let hi_a   = _mm256_and_si256(_mm256_srli_epi16(inp_a, 4), mask_0f);
+        let prod_a = _mm256_xor_si256(
+            _mm256_shuffle_epi8(lo_tbl, lo_a),
+            _mm256_shuffle_epi8(hi_tbl, hi_a),
         );
-        let cur  = _mm256_loadu_si256(dst[off..].as_ptr() as *const __m256i);
-        _mm256_storeu_si256(dst[off..].as_mut_ptr() as *mut __m256i,
-                            _mm256_xor_si256(cur, prod));
+        let cur_a  = _mm256_loadu_si256(dst[off..].as_ptr() as *const __m256i);
+
+        // Chain B — bytes [off+32 .. off+64]
+        let inp_b  = _mm256_loadu_si256(src[off + 32..].as_ptr() as *const __m256i);
+        let lo_b   = _mm256_and_si256(inp_b, mask_0f);
+        let hi_b   = _mm256_and_si256(_mm256_srli_epi16(inp_b, 4), mask_0f);
+        let prod_b = _mm256_xor_si256(
+            _mm256_shuffle_epi8(lo_tbl, lo_b),
+            _mm256_shuffle_epi8(hi_tbl, hi_b),
+        );
+        let cur_b  = _mm256_loadu_si256(dst[off + 32..].as_ptr() as *const __m256i);
+
+        _mm256_storeu_si256(
+            dst[off..].as_mut_ptr() as *mut __m256i,
+            _mm256_xor_si256(cur_a, prod_a),
+        );
+        _mm256_storeu_si256(
+            dst[off + 32..].as_mut_ptr() as *mut __m256i,
+            _mm256_xor_si256(cur_b, prod_b),
+        );
     }
 
-    let base = chunks * 32;
-    // Remainder handled by SSSE3 for up to 16 bytes, then scalar tail
+    // ── Remainder: up to 63 bytes via SSSE3 + scalar tail ────────────
+    let base = unrolled * 64;
     ssse3_mul_acc(&mut dst[base..base + rem], &src[base..base + rem], t);
 }
 
 #[target_feature(enable = "avx2")]
 unsafe fn avx2_mul_scale(dst: &mut [u8], t: &NibbleTables) {
     use std::arch::x86_64::*;
-    let lo128 = _mm_loadu_si128(t.lo.as_ptr() as *const __m128i);
-    let hi128 = _mm_loadu_si128(t.hi.as_ptr() as *const __m128i);
+    let lo128   = _mm_loadu_si128(t.lo.as_ptr() as *const __m128i);
+    let hi128   = _mm_loadu_si128(t.hi.as_ptr() as *const __m128i);
     let lo_tbl  = _mm256_broadcastsi128_si256(lo128);
     let hi_tbl  = _mm256_broadcastsi128_si256(hi128);
     let mask_0f = _mm256_set1_epi8(0x0F_u8 as i8);
 
-    let chunks = dst.len() / 32;
-    let rem    = dst.len() % 32;
+    // ── 2× unrolled: 64 bytes per iteration ──────────────────────────
+    let unrolled = dst.len() / 64;
+    let rem      = dst.len() % 64;
 
-    for i in 0..chunks {
-        let off = i * 32;
-        let inp = _mm256_loadu_si256(dst[off..].as_ptr() as *const __m256i);
-        let lo_n = _mm256_and_si256(inp, mask_0f);
-        let hi_n = _mm256_and_si256(_mm256_srli_epi16(inp, 4), mask_0f);
-        let prod = _mm256_xor_si256(
-            _mm256_shuffle_epi8(lo_tbl, lo_n),
-            _mm256_shuffle_epi8(hi_tbl, hi_n),
+    for i in 0..unrolled {
+        let off = i * 64;
+
+        // Chain A
+        let inp_a  = _mm256_loadu_si256(dst[off..].as_ptr() as *const __m256i);
+        let prod_a = _mm256_xor_si256(
+            _mm256_shuffle_epi8(lo_tbl, _mm256_and_si256(inp_a, mask_0f)),
+            _mm256_shuffle_epi8(hi_tbl, _mm256_and_si256(_mm256_srli_epi16(inp_a, 4), mask_0f)),
         );
-        _mm256_storeu_si256(dst[off..].as_mut_ptr() as *mut __m256i, prod);
+
+        // Chain B
+        let inp_b  = _mm256_loadu_si256(dst[off + 32..].as_ptr() as *const __m256i);
+        let prod_b = _mm256_xor_si256(
+            _mm256_shuffle_epi8(lo_tbl, _mm256_and_si256(inp_b, mask_0f)),
+            _mm256_shuffle_epi8(hi_tbl, _mm256_and_si256(_mm256_srli_epi16(inp_b, 4), mask_0f)),
+        );
+
+        _mm256_storeu_si256(dst[off..].as_mut_ptr() as *mut __m256i, prod_a);
+        _mm256_storeu_si256(dst[off + 32..].as_mut_ptr() as *mut __m256i, prod_b);
     }
 
-    let base = chunks * 32;
+    // ── Remainder ─────────────────────────────────────────────────────
+    let base = unrolled * 64;
     ssse3_mul_scale(&mut dst[base..base + rem], t);
 }
 
@@ -326,17 +383,22 @@ fn gf2_4_mul_raw(a: u8, b: u8) -> u8 {
 // Test oracles
 // ═══════════════════════════════════════════════════════════════
 
-#[cfg(test)]
+/// Scalar reference implementations — always compiled.
+/// Used for correctness tests and as SIMD baseline in benchmarks.
 pub fn mul_acc_gf2_8_reference(dst: &mut [u8], src: &[u8], coef: u8) {
     for (d, &s) in dst.iter_mut().zip(src) { *d ^= gf2_8_mul_raw(s, coef); }
 }
-#[cfg(test)]
 pub fn mul_scale_gf2_8_reference(buf: &mut [u8], coef: u8) {
     for b in buf.iter_mut() { *b = gf2_8_mul_raw(*b, coef); }
 }
-#[cfg(test)]
 pub fn mul_acc_gf2_4_reference(dst: &mut [u8], src: &[u8], coef: u8) {
-    for (d, &s) in dst.iter_mut().zip(src) { *d ^= gf2_4_mul_packed_scalar(s, coef); }
+    let c_lo = coef & 0x0F;
+    let c_hi = coef >> 4;
+    for (d, &s) in dst.iter_mut().zip(src) {
+        let hi = gf2_4_mul_raw((s >> 4) & 0x0F, c_hi) << 4;
+        let lo = gf2_4_mul_raw(s & 0x0F, c_lo);
+        *d ^= hi | lo;
+    }
 }
 
 #[cfg(test)]

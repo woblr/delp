@@ -127,6 +127,54 @@ pub fn cauchy_batch_gf2_8(source_ids: &[u32], coded_id: u32) -> SmallVec<[u8; 64
         .collect()
 }
 
+// ── GF(2^4) Cauchy matrix ─────────────────────────────────────────────────
+//
+// Point assignment (GF(2^4), 16 elements total):
+//   source points  x_i = i     for i in 0..7  → {0..6}
+//   coded  points  y_j = 8 + j for j in 0..7  → {8..14}
+//
+// Disjointness: x_i ∈ {0..6}, y_j ∈ {8..14} → x_i XOR y_j ≥ 8 ≠ 0.
+// Capacity: up to 7 source symbols × 7 coded symbols per session.
+
+/// Cauchy coefficient for GF(2⁴).
+///
+/// `src_id` must be < 7, `coded_id` must be < 7.
+/// Returns `1 / (src_id XOR (8 + coded_id))` in GF(2⁴).
+#[inline]
+pub fn cauchy_coef_gf2_4(src_id: u32, coded_id: u32) -> u8 {
+    debug_assert!(src_id  < 7, "GF(2^4) Cauchy: src_id must be < 7, got {src_id}");
+    debug_assert!(coded_id < 7, "GF(2^4) Cauchy: coded_id must be < 7, got {coded_id}");
+    use crate::gf::{Field as GfField, Gf2_4};
+    let x = src_id as u8;           // 0..6
+    let y = 8u8 + coded_id as u8;   // 8..14
+    // x XOR y: x < 8 so bit-3 is 0; y ≥ 8 so bit-3 is set → XOR ≥ 8, never 0
+    let denom = Gf2_4::from_u8(x ^ y);
+    denom.inv().to_u8()
+}
+
+/// Batch GF(2^4) Cauchy coefficients.
+///
+/// All source IDs must be < 7 and coded_id < 7.
+pub fn cauchy_batch_gf2_4(source_ids: &[u32], coded_id: u32) -> SmallVec<[u8; 64]> {
+    source_ids.iter()
+        .map(|&sid| cauchy_coef_gf2_4(sid, coded_id))
+        .collect()
+}
+
+/// MDS verification helper for GF(2^4) Cauchy.
+#[cfg(any(test, debug_assertions))]
+pub fn verify_cauchy_gf2_4_2x2_nonsingular(
+    s0: u32, s1: u32, c0: u32, c1: u32,
+) -> bool {
+    use crate::gf::{Field as GfField, Gf2_4};
+    let a00 = Gf2_4::from_u8(cauchy_coef_gf2_4(s0, c0));
+    let a01 = Gf2_4::from_u8(cauchy_coef_gf2_4(s0, c1));
+    let a10 = Gf2_4::from_u8(cauchy_coef_gf2_4(s1, c0));
+    let a11 = Gf2_4::from_u8(cauchy_coef_gf2_4(s1, c1));
+    let det = a00.mul(a11).add(a01.mul(a10));
+    det != Gf2_4::ZERO
+}
+
 /// Verify the MDS property of the Cauchy construction:
 /// for any two distinct (src, coded) pairs the 2×2 submatrix is non-singular.
 ///
@@ -149,7 +197,6 @@ pub fn verify_cauchy_2x2_nonsingular(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn gf2_8_known_values() {
         // alpha^0 = 1; vandermonde(src=0, coded=1) = alpha^0 = 1
@@ -207,6 +254,134 @@ mod tests {
         for i in 0u32..128 {
             let c = cauchy_coef_gf2_8(i, i);
             assert_ne!(c, 0, "cauchy diagonal({i}) == 0");
+        }
+    }
+
+    // ── GF(2^4) Cauchy tests ─────────────────────────────────────────────
+
+    /// GF(2^4) Cauchy coefficient is always non-zero.
+    #[test]
+    fn cauchy_gf2_4_coef_never_zero() {
+        for src in 0u32..7 {
+            for coded in 0u32..7 {
+                let c = cauchy_coef_gf2_4(src, coded);
+                assert_ne!(c, 0,
+                    "cauchy_gf2_4({src},{coded}) == 0 — impossible by construction");
+            }
+        }
+    }
+
+    /// GF(2^4) Cauchy: all 2×2 submatrices are non-singular (full MDS proof).
+    #[test]
+    fn cauchy_gf2_4_2x2_nonsingular_exhaustive() {
+        for s0 in 0u32..7 {
+            for s1 in (s0+1)..7 {
+                for c0 in 0u32..7 {
+                    for c1 in (c0+1)..7 {
+                        assert!(
+                            verify_cauchy_gf2_4_2x2_nonsingular(s0, s1, c0, c1),
+                            "GF(2^4) Cauchy 2×2 singular at s=({s0},{s1}) c=({c0},{c1})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// GF(2^4) Cauchy batch matches scalar.
+    #[test]
+    fn cauchy_gf2_4_batch_matches_scalar() {
+        let ids: Vec<u32> = (0..6).collect();
+        for coded in 0u32..6 {
+            let batch = cauchy_batch_gf2_4(&ids, coded);
+            for (i, &sid) in ids.iter().enumerate() {
+                assert_eq!(batch[i], cauchy_coef_gf2_4(sid, coded),
+                    "gf2_4 batch mismatch src={sid} coded={coded}");
+            }
+        }
+    }
+
+    // ── Property-based tests (proptest) ──────────────────────────────────
+
+    proptest::proptest! {
+        /// For any non-zero GF(2^8) element a,  a * a^-1 == 1.
+        #[test]
+        fn prop_gf2_8_inv_correct(a in 1u8..=255u8) {
+            use crate::gf::{Field as GfField, Gf2_8};
+            let fa = Gf2_8::from_u8(a);
+            proptest::prop_assert_eq!(fa.mul(fa.inv()), Gf2_8::ONE);
+        }
+
+        /// GF(2^8) multiplication is commutative.
+        #[test]
+        fn prop_gf2_8_mul_commutative(a in 0u8..=255u8, b in 0u8..=255u8) {
+            use crate::gf::{Field as GfField, Gf2_8};
+            let fa = Gf2_8::from_u8(a);
+            let fb = Gf2_8::from_u8(b);
+            proptest::prop_assert_eq!(fa.mul(fb), fb.mul(fa));
+        }
+
+        /// GF(2^8) multiplication is associative.
+        #[test]
+        fn prop_gf2_8_mul_associative(
+            a in 0u8..=255u8,
+            b in 0u8..=255u8,
+            c in 0u8..=255u8,
+        ) {
+            use crate::gf::{Field as GfField, Gf2_8};
+            let fa = Gf2_8::from_u8(a);
+            let fb = Gf2_8::from_u8(b);
+            let fc = Gf2_8::from_u8(c);
+            proptest::prop_assert_eq!(fa.mul(fb).mul(fc), fa.mul(fb.mul(fc)));
+        }
+
+        /// Cauchy GF(2^8): any two distinct (src,coded) pairs give non-singular 2×2.
+        #[test]
+        fn prop_cauchy_gf2_8_2x2_nonsingular(
+            s0 in 0u32..127,
+            s1 in 0u32..127,
+            c0 in 0u32..127,
+            c1 in 0u32..127,
+        ) {
+            proptest::prop_assume!(s0 != s1 && c0 != c1);
+            proptest::prop_assert!(verify_cauchy_2x2_nonsingular(s0, s1, c0, c1),
+                "Cauchy 2×2 singular at s=({s0},{s1}) c=({c0},{c1})");
+        }
+
+        /// SIMD mul_acc matches reference for arbitrary coefficients and data.
+        #[test]
+        fn prop_simd_mul_acc_matches_reference(
+            coef in 0u8..=255u8,
+            data in proptest::collection::vec(0u8..=255u8, 1..=128usize),
+        ) {
+            use crate::gf::simd::ops::mul_acc_gf2_8;
+            use crate::gf::simd::mul_acc_gf2_8_reference;
+            let mut simd_dst  = vec![0u8; data.len()];
+            let mut ref_dst   = vec![0u8; data.len()];
+            mul_acc_gf2_8(&mut simd_dst, &data, coef);
+            mul_acc_gf2_8_reference(&mut ref_dst, &data, coef);
+            proptest::prop_assert_eq!(simd_dst, ref_dst);
+        }
+
+        /// Vandermonde 2×2 non-singular for distinct small IDs (regression guard).
+        #[test]
+        fn prop_vandermonde_2x2_nonsingular(
+            s0 in 0u32..7,
+            s1 in 0u32..7,
+            c0 in 1u32..7,
+            c1 in 1u32..7,
+        ) {
+            use crate::gf::{Field as GfField, Gf2_8};
+            proptest::prop_assume!(s0 != s1 && c0 != c1);
+            let a00 = Gf2_8::vandermonde(s0, c0);
+            let a01 = Gf2_8::vandermonde(s1, c0);
+            let a10 = Gf2_8::vandermonde(s0, c1);
+            let a11 = Gf2_8::vandermonde(s1, c1);
+            let det = a00.mul(a11).add(a01.mul(a10));
+            proptest::prop_assert!(
+                det != Gf2_8::ZERO,
+                "Vandermonde 2×2 singular s=({},{}) c=({},{})", s0, s1, c0, c1
+            );
         }
     }
 

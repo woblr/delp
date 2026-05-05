@@ -184,8 +184,14 @@ impl EncoderConfigBuilder {
         if self.fec_denom == 0 {
             return Err(DelpError::InvalidFecDenom);
         }
-        if self.matrix_strategy == MatrixStrategy::Cauchy && self.window_capacity > 128 {
-            return Err(DelpError::InvalidWindowCapacity); // Cauchy max 128
+        if self.matrix_strategy == MatrixStrategy::Cauchy {
+            let cauchy_max = match self.field {
+                Field::Gf2_8 => 128,
+                Field::Gf2_4 => 7,
+            };
+            if self.window_capacity > cauchy_max {
+                return Err(DelpError::InvalidWindowCapacity);
+            }
         }
         Ok(EncoderConfig {
             symbol_size:     self.symbol_size,

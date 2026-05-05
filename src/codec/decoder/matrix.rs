@@ -572,8 +572,6 @@ mod tests {
         // Deliver coded packets (some dropped)
         for (coded_id, payload) in &coded_payloads {
             if should_drop() { continue; }
-            let src_ids: smallvec::SmallVec<[u32; 64]> =
-                (0..n_src as u32).collect();
             let ev = make_ev(field, &(0..n_src as u32).collect::<Vec<_>>(), *coded_id);
             let recovered = matrix.add_coded(&ev, payload, &known).unwrap();
             for (id, data) in recovered {
@@ -608,7 +606,7 @@ mod tests {
         use crate::wire::ev::coef_gen::vandermonde_coef;
 
         let sources: Vec<Vec<u8>> = (0..n_src)
-            .map(|i| (0..sym_size).map(|j| ((i * 17 + j) as u8)).collect())
+            .map(|i| (0..sym_size).map(|j| (i * 17 + j) as u8).collect())
             .collect();
 
         // All 4 coded packets
