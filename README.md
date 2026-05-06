@@ -1,275 +1,116 @@
 # delp
 
-Production-grade pure-Rust forward error correction (FEC) library for lossy
-networks.  Implements an elastic-window erasure code: the sender XORs source
-packets into coded (repair) packets using Galois field arithmetic; the
-receiver recovers lost packets by solving a linear system over the same
-field.  The encoding window adapts in real time based on receiver feedback.
+Forward error correction for lossy networks, written in Rust.
 
-```toml
-[dependencies]
-delp = "1"
+The encoder keeps a sliding window of source packets and emits redundant "coded" packets that are linear combinations of recent symbols over a Galois field. When a source packet is lost, the receiver solves the resulting linear system to recover it without asking for a retransmission. The window adapts to the receiver's acknowledgments, so unlike block codes there is no fixed batch the receiver has to wait out before recovery becomes possible.
 
-# Async UDP transport (FecSender, FecReceiver, DelpSession):
-delp = { version = "1", features = ["async"] }
-```
+## What it is good for
 
-## Why
+Links where retransmission is too expensive to wait out: real-time video and audio, satellite, very long round-trips, multicast, IoT over noisy radio. delp sits between an application and UDP, recovers most of the channel loss in software, and stops adding redundancy when the channel is clean.
 
-Standard block codes commit to a code rate up front and incur full decoder
-latency before any source symbol becomes available.  Sliding-window codes
-retransmissions.  This keeps tail latency low on lossy links — wireless,
-satellite, real-time media — where retransmits are expensive or impossible.
+## Status
+
+The library compiles, runs, and passes its full test suite (codec round trips, wire format, SIMD kernels, property tests, stress tests, async transport, long-session Cauchy). It cross-compiles for aarch64. CI runs format, clippy with warnings denied, every feature combination, an MSRV build, and a documentation build.
+
+What is not in the box yet: a fuzz harness against the wire-format parsers, a `cargo-audit` integration in CI, multi-version MSRV testing, and a deployment-grade audit by anyone other than the author. The public API is not yet stable; expect breaking changes before a 1.0 tag.
+
+## Install
+
+Library:
+
+    [dependencies]
+    delp = "1"
+
+With the optional async UDP transport (`FecSender`, `FecReceiver`, `DelpSession`):
+
+    delp = { version = "1", features = ["async"] }
+
+CLI:
+
+    cargo install --path delp-cli
+
+## CLI
+
+The `delp` binary measures the codec on your hardware and exercises the protocol over a real socket without any Rust glue.
+
+**Throughput.** Encodes and decodes a synthetic stream end-to-end, prints MB/s for each side.
+
+    delp bench --symbol-size 1024 --window 64 --symbols 10000
+    delp bench --symbol-size 1024 --window 32 --symbols 10000 --strategy cauchy
+
+**File transfer over UDP.** Two terminals.
+
+Receiver:
+
+    delp recv --bind 0.0.0.0:9000 --output received.bin
+
+Sender:
+
+    delp send --file input.bin --dest 127.0.0.1:9000 --loss-rate 0.10
+
+The sender drops a configurable fraction of source packets before they hit the wire and announces the file's SHA-256 in a session-start frame. The receiver verifies the digest before writing the output, so a successful run is a byte-exact recovery, not a "looks fine" recovery.
+
+Most useful flags:
+
+| Flag | Effect |
+|---|---|
+| `--symbol-size N` | Bytes per FEC symbol (default 1024). |
+| `--window N` | Sliding-window capacity (default 32). |
+| `--fec N:D` | Redundancy ratio, `1:1` = one coded packet per source packet. |
+| `--strategy {vandermonde,cauchy}` | Coefficient strategy. |
+| `--altc {none,recent,per-receiver}` | Adaptive subset coding (see below). |
+| `--altc-recent N` | Under `--altc recent`, cover the last N symbols. |
+| `--loss-rate F` | Drop a fraction of source packets at the sender. |
+
+**Demos.** Two subcommands prove the two delp-specific extensions on stdout, no network needed.
+
+    delp demo altc
+
+Generates a full-window coded packet and an ALTC-targeted coded packet from the same encoder state, then prints the wire sizes, the source-ID counts in the encoding vector, and the resulting decoder row weight. With Cauchy the wire size shrinks linearly with the cover; with Vandermonde the matrix-row weight drops by the same ratio.
+
+    delp demo generation --coded 1200
+
+Runs a Cauchy session through 1 200 coded packets — well past the per-cycle limit — and prints the generation counter rolling over while the decoder keeps accepting packets without an error.
 
 ## Features
 
-- **Pure state machine** — codec has no I/O, no async runtime, no threads.
-  All methods are synchronous `&mut self` transitions; transport is the
-  caller's concern.
-- **Async UDP transport** — optional `async` feature ships
-  `FecSender` / `FecReceiver` / `DelpSession` over `tokio::net::UdpSocket`,
-  including `futures_core::Stream` and `futures_sink::Sink` impls.
-- **GF(2⁴) and GF(2⁸)** finite fields with compile-time log/exp tables
-  (zero startup cost).
-- **SIMD-accelerated bulk arithmetic** — AVX2 (64 B/iter, 2× unrolled) /
-  SSSE3 (16 B/iter) / aarch64 NEON (16 B/iter via `vqtbl1q_u8`) /
-  scalar fallback, dispatched once at startup.
-- **Two MDS-grade matrix strategies**: Vandermonde (cheap to compute) and
-  Cauchy (mathematically proven full-rank submatrices for any erasure
-  pattern).
-- **Pluggable policies** for window eviction, congestion control, FEC
-  rate, and feedback scheduling — swappable without forking the codec.
-- **Multi-receiver ACK tracking** with cumulative + selective ACK
-  (SACK) bit-vector encoding.
-- **Zero-copy wire format** — packets parse via `zerocopy`; payloads
-  are `bytes::Bytes` slices on the hot path.
-- **Backpressure flow control** — `BackpressureMode::Reject` returns
-  `Err(WindowFull)` instead of evicting unacknowledged symbols.
+Library:
 
-### What's novel
+- GF(2⁴) and GF(2⁸) finite-field arithmetic with compile-time log/exp tables (no `OnceLock` initialisation cost).
+- SIMD multiply-accumulate kernels for the hot path: AVX2 (64 B/iter, 2× unrolled), SSSE3 (16 B/iter), aarch64 NEON (16 B/iter via `vqtbl1q_u8`), scalar fallback. Runtime dispatch.
+- Two coefficient strategies switchable per encoder: Vandermonde and Cauchy.
+- Pluggable strategy traits for window eviction, congestion control, FEC rate, and feedback scheduling.
+- Multi-receiver ACK tracking with cumulative + selective acknowledgment encoding.
+- Optional async UDP transport built on `tokio::net::UdpSocket`, with `Stream` and `Sink` impls.
+- Backpressure flow control — the encoder can return `WindowFull` to the caller instead of evicting unacknowledged symbols.
 
-Two delp-specific extensions that other sliding-window FEC libraries don't
-implement:
+Two extensions on top of the standard sliding-window construction:
 
-- **Unlimited-length sessions via Generation Rotation.** Standard Cauchy
-  GF(2⁸) coding maxes out at 128 coded packets per session: there are only
-  128 disjoint y-points.  delp adds a 1-byte `generation` field to the
-  encoding vector that rotates the y-point assignment by `(coded_id +
-  gen·K) mod cycle` (`K` coprime to `cycle`).  Each generation yields 128
-  fresh, linearly-independent coded packets; with a `u8` counter that's
-  32 768 packets per session.  The wire change is backward compatible —
-  `generation = 0` is bit-identical to RFC 9407.
-- **Adaptive Loss-Targeted Coding (ALTC).** RFC 9407 always covers the
-  *entire* window in every coded packet, even when most of those symbols
-  have already been delivered.  delp lets the encoder generate a coded
-  packet over an arbitrary subset of the window:
-  - `generate_coded_targeted(&[id])` — explicit subset
-  - `generate_coded_recent(n)` — most-recent `n` symbols (recent-loss
-    prioritisation)
-  - `generate_coded_for_receiver(rid)` — only symbols not yet ACK'd by a
-    specific receiver, computed from the per-receiver SACK state
-  Smaller cover sets translate directly to fewer GF multiplications at
-  the encoder and sparser matrix rows at the decoder.  Cauchy coded
-  packets also shrink linearly on the wire because their explicit
-  coefficient list contracts with the cover.
-
-## Architecture
-
-```text
-┌────────────────────────────────────────────────────┐
-│  config      EncoderConfig / DecoderConfig         │
-│  error       DelpError enum                        │
-├────────────────────────────────────────────────────┤
-│  gf/         GF(2⁴) + GF(2⁸) + SIMD mul_acc        │
-├────────────────────────────────────────────────────┤
-│  wire/       binary packet wire format             │
-│    common    CommonHeader                          │
-│    source    SourcePacket                          │
-│    coded     CodedPacket                           │
-│    feedback  FeedbackPacket (window update + SACK) │
-│    ev/       EncodingVector + 4 ID storage formats │
-├────────────────────────────────────────────────────┤
-│  policy/     Pluggable strategy traits             │
-│    WindowPolicy       AnyAck / AllAck / Quorum     │
-│    CongestionControl  NoCC                         │
-│    FecRateController  Constant / Adaptive          │
-│    FeedbackPolicy     Constant / Immediate         │
-├────────────────────────────────────────────────────┤
-│  codec/      Pure state machines (no I/O)          │
-│    encoder   Encoder<W,C,F> + sliding window       │
-│    decoder   Decoder<P>     + matrix + buffer      │
-├────────────────────────────────────────────────────┤
-│  transport/  Async UDP layer (feature = "async")   │
-│    FecSender / FecReceiver / DelpSession           │
-└────────────────────────────────────────────────────┘
-```
-
-## Quick start — sync codec
-
-```rust
-use bytes::Bytes;
-use delp::{
-    config::{EncoderConfig, DecoderConfig},
-    codec::{DefaultEncoder, DefaultDecoder, EncoderOutput, DecoderEvent},
-    wire::{source::SourcePacket, coded::CodedPacket},
-};
-
-let enc_cfg = EncoderConfig::builder(1024)
-    .window_capacity(32)
-    .fec_rate(1, 4)             // 25 % redundancy
-    .build()?;
-let dec_cfg = DecoderConfig::builder(1024).build()?;
-
-let mut enc = DefaultEncoder::with_defaults(enc_cfg);
-let mut dec = DefaultDecoder::with_defaults(dec_cfg);
-
-// Submit one source symbol → encoder emits 1 source + 0..N coded packets
-let symbol = Bytes::from(vec![0x42u8; 1024]);
-for pkt in enc.submit_source(symbol)? {
-    match pkt {
-        EncoderOutput::Source(raw) => {
-            let sp = SourcePacket::parse(&raw)?;
-            for ev in dec.handle_source(&sp)? {
-                if let DecoderEvent::SourceReady { id, data } = ev {
-                    println!("delivered {id}: {} B", data.len());
-                }
-            }
-        }
-        EncoderOutput::Coded(raw) => {
-            let cp = CodedPacket::parse(&raw)?;
-            let _ = dec.handle_coded(&cp)?;
-        }
-    }
-}
-```
-
-## Quick start — async UDP
-
-```rust
-use delp::transport::session::SessionBuilder;
-
-let session = SessionBuilder::new()
-    .symbol_size(1024)
-    .window_capacity(32)
-    .fec_rate(1, 2)
-    .build("0.0.0.0:5000".parse()?, "192.168.1.2:5001".parse()?)
-    .await?;
-
-let (mut tx, mut rx) = session.split();
-tokio::spawn(async move { tx.send_source(payload).await });
-tokio::spawn(async move {
-    while let Ok((id, data)) = rx.recv_source().await {
-        // ...
-    }
-});
-```
-
-## Examples
-
-- [`udp_fec.rs`](examples/udp_fec.rs) — minimal end-to-end FEC over a
-  loopback UDP link with simulated 30 % source-packet loss.
-- [`file_transfer.rs`](examples/file_transfer.rs) — chunks a 128 KB blob
-  into symbols, transfers it through a lossy proxy, and verifies
-  byte-exact reconstruction on the other end.
-
-```bash
-cargo run --example udp_fec        --features async
-cargo run --example file_transfer  --features async --release
-```
-
-## CLI — `delp` binary
-
-The [`delp-cli`](delp-cli/) workspace member ships a single `delp`
-binary anyone can install and use to verify the library's claims on
-their own machine.
-
-```bash
-# Install from this checkout
-cargo install --path delp-cli
-
-# Throughput benchmark
-delp bench --symbol-size 1024 --window 64 --symbols 10000
-
-# Live wire-size proof of ALTC vs full-window coding
-delp demo altc --window 32 --cover 8
-
-# Drive a Cauchy session past the RFC 9407 128-packet cap
-delp demo generation --symbols 12 --coded 1200
-
-# File transfer over UDP with 10 % simulated loss
-#   Terminal 1:
-delp recv --bind 127.0.0.1:9000 --output received.bin
-#   Terminal 2:
-delp send --file input.bin --dest 127.0.0.1:9000 --loss-rate 0.1
-
-# Same transfer with 30 % loss + ALTC recent-loss prioritisation
-delp send --file input.bin --dest 127.0.0.1:9000 \
-          --loss-rate 0.30 --altc recent --altc-recent 8
-
-# Cauchy session that survives the original 128-packet limit
-delp send --file input.bin --dest 127.0.0.1:9000 \
-          --strategy cauchy --window 32 --loss-rate 0.2
-```
-
-The receiver verifies the SHA-256 digest declared in the START frame
-before writing the output, so a successful run is byte-exact recovery.
-
-## Matrix strategies
-
-| Strategy    | Field   | Cycle length | Effective per session¹ | MDS guarantee |
-|-------------|---------|--------------|------------------------|---------------|
-| Vandermonde | GF(2⁸)  | 254          | unlimited (sliding)    | empirical     |
-| Vandermonde | GF(2⁴)  | 14           | unlimited (sliding)    | empirical     |
-| Cauchy      | GF(2⁸)  | 128          | **128 × 256 = 32 768** | **proven**    |
-| Cauchy      | GF(2⁴)  | 7            | 7 × 256 = 1 792        | **proven**    |
-
-¹ With the new `generation`-rotation extension.  Cauchy bumps a `u8`
-generation counter every full coded-id cycle, rotating the y-point
-assignment so successive cycles produce linearly-independent rows.
-Vandermonde relies on the sliding window: as the window advances the
-same coded-id label, paired with new source IDs in the EV, naturally
-yields fresh equations.
-
-When you need guaranteed recovery from any k-erasure pattern, choose
-`MatrixStrategy::Cauchy`; otherwise the default `Vandermonde` is
-slightly cheaper to compute.
+- **Generation rotation.** Cauchy GF(2⁸) admits 128 distinct coded IDs per cycle because the y-point set has 128 disjoint values. delp adds a one-byte generation field to the encoding vector. The y-point assignment rotates by `(coded_id + gen·K) mod cycle` with `K` coprime to the cycle, so each generation produces a fresh batch of 128 linearly-independent coded packets. With a u8 counter that is at least 32 768 coded packets per session before the encoder needs a session reset. The wire change is backward compatible: when generation is zero the encoding vector is byte-identical to the base format.
+- **Adaptive Loss-Targeted Coding.** A coded packet does not have to cover the entire window. The encoder exposes three subset selectors: an explicit list of source IDs, the most-recent N symbols, or the IDs that a specific receiver has not yet acknowledged. Smaller covers translate directly into fewer GF multiplications at the encoder, sparser rows at the decoder, and (under Cauchy, where the coefficient list is sent explicitly) shorter packets on the wire.
 
 ## Performance
 
-Criterion benchmarks ship under `benches/`:
+Numbers below are from `delp bench` on a single x86-64 machine with AVX2 detected at runtime, 1024-byte symbols, in-process loopback (no UDP, no loss). Treat as orientation, not as benchmark results.
 
-```bash
-cargo bench
-```
+| Strategy    | Encode    | Decode   |
+|-------------|-----------|----------|
+| Vandermonde | ~290 MB/s | ~35 MB/s |
+| Cauchy      | ~480 MB/s | ~20 MB/s |
 
-On x86_64 with AVX2 the SIMD `mul_acc_gf2_8` kernel processes 64 bytes
-per loop iteration (2× unrolled, two independent dependency chains).
-Coefficient generation, dispatch, and nibble tables are all hoisted out
-of the inner loop in the encoder's `compute_coded_payload`.
+The encode path is dominated by the SIMD multiply-accumulate; the numbers track vector width on different hardware. Decode is bound by the Gaussian-elimination row substitution and is the main optimisation target left in the codec.
 
-## Testing
+## Tests
 
-```bash
-cargo test --all-features
-```
+`cargo test --workspace --all-features` runs 136 tests grouped as:
 
-136+ tests across:
-- 98 unit tests — field axioms, exhaustive small GF tables, wire-format
-  round-trips, policy semantics
-- 8 ALTC integration tests — targeted coding, per-receiver coverage,
-  recovery correctness
-- 5 async UDP transport integration tests
-- 3 long-session Cauchy tests (1 200-packet sessions, generation
-  rotation through 9+ cycles)
-- 8 stress tests — random / burst / head loss patterns
-- 5 codec property tests + 7 SIMD property tests (proptest)
-- 2 doc tests
-
-CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `clippy
--D warnings`, the full test suite under `--no-default-features` /
-default / `--all-features`, an aarch64 cross-compile, an MSRV build,
-`cargo audit`, and `cargo doc -D warnings`.
+- Codec, wire format, and GF axioms (~100 tests inside the library).
+- Async UDP transport, end-to-end on loopback.
+- Property tests over random loss patterns and SIMD kernels (12 tests, proptest).
+- Stress tests with random, bursty, and head-of-stream loss patterns.
+- A 1 200-packet Cauchy session that crosses the per-cycle boundary.
+- ALTC subset-coding integration tests.
 
 ## License
 
-Apache-2.0
+Apache-2.0.
