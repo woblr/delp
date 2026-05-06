@@ -29,22 +29,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Configuration ─────────────────────────────────────────────────────
 
-    const SYMBOL_SIZE: usize = 1024;    // bytes per source symbol
-    const WINDOW:      usize = 16;      // symbols in the encoding window
-    const N_SYMBOLS:   usize = 12;      // total source symbols to send
-    const LOSS_PCT:    u8    = 30;      // simulated packet loss %
+    const SYMBOL_SIZE: usize = 1024; // bytes per source symbol
+    const WINDOW: usize = 16; // symbols in the encoding window
+    const N_SYMBOLS: usize = 12; // total source symbols to send
+    const LOSS_PCT: u8 = 30; // simulated packet loss %
 
     // ── Sockets ───────────────────────────────────────────────────────────
 
     // sender_sock ──► [lossy proxy] ──► receiver_sock
     //     ◄────────────── feedback ───────────────────
 
-    let sender_sock   = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
-    let proxy_sock    = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+    let sender_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+    let proxy_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let receiver_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
 
-    let sender_addr   = sender_sock.local_addr()?;
-    let proxy_addr    = proxy_sock.local_addr()?;
+    let sender_addr = sender_sock.local_addr()?;
+    let proxy_addr = proxy_sock.local_addr()?;
     let receiver_addr = receiver_sock.local_addr()?;
 
     println!("Sender:   {sender_addr}");
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let enc_cfg = EncoderConfig::builder(SYMBOL_SIZE)
         .window_capacity(WINDOW)
-        .fec_rate(1, 1)                      // 100% FEC: 1 coded per source
+        .fec_rate(1, 1) // 100% FEC: 1 coded per source
         .matrix_strategy(MatrixStrategy::Vandermonde)
         .build()?;
 
@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let encoder = DefaultEncoder::with_defaults(enc_cfg);
     let decoder = DefaultDecoder::with_defaults(dec_cfg);
 
-    let mut sender   = FecSender::new(encoder, Arc::clone(&sender_sock), proxy_addr);
+    let mut sender = FecSender::new(encoder, Arc::clone(&sender_sock), proxy_addr);
     let mut receiver = FecReceiver::new(decoder, Arc::clone(&receiver_sock), sender_addr);
 
     // ── Lossy proxy task ──────────────────────────────────────────────────
@@ -76,15 +76,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // without loss.
 
     let proxy = {
-        let psock    = Arc::clone(&proxy_sock);
-        let rx_addr  = receiver_addr;
-        let tx_addr  = sender_addr;
+        let psock = Arc::clone(&proxy_sock);
+        let rx_addr = receiver_addr;
+        let tx_addr = sender_addr;
         tokio::spawn(async move {
-            let mut buf   = vec![0u8; 65536];
+            let mut buf = vec![0u8; 65536];
             let mut total = 0u32;
-            let mut dropped = 0u32;
             loop {
-                let (n, src) = psock.recv_from(&mut buf).await.unwrap();
+                let (n, _src) = psock.recv_from(&mut buf).await.unwrap();
                 let raw = buf[..n].to_vec();
                 total += 1;
 
@@ -94,16 +93,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                // Source / coded: apply loss.
-                let drop = (rand_u8() % 100) < LOSS_PCT;
+                // Drop source packets at the configured loss rate; always
+                // forward coded packets so the receiver can recover lost
+                // sources via the FEC equations.
+                let is_source = raw[3] == 0x00;
+                let drop = is_source && (rand_u8() % 100) < LOSS_PCT;
                 if drop {
-                    dropped += 1;
-                    let pkt_type = if raw[3] == 0x00 { "source" } else { "coded" };
-                    println!("  proxy: dropped {pkt_type} pkt #{total}");
+                    println!("  proxy: dropped source pkt #{total}");
                 } else {
                     psock.send_to(&raw, rx_addr).await.unwrap();
                 }
-                let _ = src;
             }
         })
     };
@@ -112,8 +111,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let send_task = tokio::spawn(async move {
         for i in 0..N_SYMBOLS {
-            let data = Bytes::from(format!("symbol-{i:04}").into_bytes()
-                .into_iter().cycle().take(SYMBOL_SIZE).collect::<Vec<_>>());
+            let data = Bytes::from(
+                format!("symbol-{i:04}")
+                    .into_bytes()
+                    .into_iter()
+                    .cycle()
+                    .take(SYMBOL_SIZE)
+                    .collect::<Vec<_>>(),
+            );
             sender.send_source(data).await.unwrap();
             println!("  sent source symbol {i}");
             sleep(Duration::from_millis(5)).await;
@@ -128,10 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let recv_task = tokio::spawn(async move {
         for expected_id in 0..N_SYMBOLS {
-            let (id, data) = tokio::time::timeout(
-                Duration::from_secs(5),
-                receiver.recv_source(),
-            ).await
+            let (id, data) = tokio::time::timeout(Duration::from_secs(5), receiver.recv_source())
+                .await
                 .expect("timeout — FEC recovery failed")
                 .unwrap();
 
@@ -154,15 +157,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Minimal PRNG — avoids pulling in `rand` as a non-dev dependency.
+///
+/// Seeded from the system clock at first call so consecutive runs of the
+/// example exercise different drop patterns.
 #[cfg(feature = "async")]
 fn rand_u8() -> u8 {
     use std::cell::Cell;
+    use std::time::{SystemTime, UNIX_EPOCH};
     thread_local! {
-        static STATE: Cell<u64> = Cell::new(0x853c49e6748fea9b);
+        static STATE: Cell<u64> = const { Cell::new(0) };
     }
     STATE.with(|s| {
         let mut x = s.get();
-        x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
+        if x == 0 {
+            x = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0x853c49e6748fea9b);
+            if x == 0 {
+                x = 0x853c49e6748fea9b;
+            }
+        }
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
         s.set(x);
         (x.wrapping_mul(0x2545f4914f6cdd1d) >> 56) as u8
     })

@@ -1,4 +1,4 @@
-use crate::error::{Result, DelpError};
+use crate::error::{DelpError, Result};
 
 /// Which Galois field to use for coefficient arithmetic.
 ///
@@ -100,24 +100,38 @@ impl EncoderConfig {
         EncoderConfigBuilder::new(symbol_size)
     }
 
-    pub fn symbol_size(&self) -> usize { self.symbol_size }
-    pub fn window_capacity(&self) -> usize { self.window_capacity }
-    pub fn field(&self) -> Field { self.field }
-    pub fn fec_numer(&self) -> usize { self.fec_numer }
-    pub fn fec_denom(&self) -> usize { self.fec_denom }
-    pub fn backpressure(&self) -> BackpressureMode { self.backpressure }
-    pub fn matrix_strategy(&self) -> MatrixStrategy { self.matrix_strategy }
+    pub fn symbol_size(&self) -> usize {
+        self.symbol_size
+    }
+    pub fn window_capacity(&self) -> usize {
+        self.window_capacity
+    }
+    pub fn field(&self) -> Field {
+        self.field
+    }
+    pub fn fec_numer(&self) -> usize {
+        self.fec_numer
+    }
+    pub fn fec_denom(&self) -> usize {
+        self.fec_denom
+    }
+    pub fn backpressure(&self) -> BackpressureMode {
+        self.backpressure
+    }
+    pub fn matrix_strategy(&self) -> MatrixStrategy {
+        self.matrix_strategy
+    }
 }
 
 /// Builder for [`EncoderConfig`].
 #[derive(Debug)]
 pub struct EncoderConfigBuilder {
-    symbol_size:     usize,
+    symbol_size: usize,
     window_capacity: usize,
-    field:           Field,
-    fec_numer:       usize,
-    fec_denom:       usize,
-    backpressure:    BackpressureMode,
+    field: Field,
+    fec_numer: usize,
+    fec_denom: usize,
+    backpressure: BackpressureMode,
     matrix_strategy: MatrixStrategy,
 }
 
@@ -126,10 +140,10 @@ impl EncoderConfigBuilder {
         Self {
             symbol_size,
             window_capacity: 256,
-            field:           Field::Gf2_8,
-            fec_numer:       1,
-            fec_denom:       4,
-            backpressure:    BackpressureMode::Reject,
+            field: Field::Gf2_8,
+            fec_numer: 1,
+            fec_denom: 4,
+            backpressure: BackpressureMode::Reject,
             matrix_strategy: MatrixStrategy::Vandermonde,
         }
     }
@@ -194,12 +208,12 @@ impl EncoderConfigBuilder {
             }
         }
         Ok(EncoderConfig {
-            symbol_size:     self.symbol_size,
+            symbol_size: self.symbol_size,
             window_capacity: self.window_capacity,
-            field:           self.field,
-            fec_numer:       self.fec_numer,
-            fec_denom:       self.fec_denom,
-            backpressure:    self.backpressure,
+            field: self.field,
+            fec_numer: self.fec_numer,
+            fec_denom: self.fec_denom,
+            backpressure: self.backpressure,
             matrix_strategy: self.matrix_strategy,
         })
     }
@@ -226,10 +240,18 @@ impl DecoderConfig {
         DecoderConfigBuilder::new(symbol_size)
     }
 
-    pub fn symbol_size(&self) -> usize { self.symbol_size }
-    pub fn field(&self) -> Field { self.field }
-    pub fn max_matrix_rows(&self) -> usize { self.max_matrix_rows }
-    pub fn feedback_every(&self) -> u32 { self.feedback_every }
+    pub fn symbol_size(&self) -> usize {
+        self.symbol_size
+    }
+    pub fn field(&self) -> Field {
+        self.field
+    }
+    pub fn max_matrix_rows(&self) -> usize {
+        self.max_matrix_rows
+    }
+    pub fn feedback_every(&self) -> u32 {
+        self.feedback_every
+    }
 }
 
 /// Builder for [`DecoderConfig`].
@@ -251,9 +273,18 @@ impl DecoderConfigBuilder {
         }
     }
 
-    pub fn field(mut self, f: Field) -> Self { self.field = f; self }
-    pub fn max_matrix_rows(mut self, n: usize) -> Self { self.max_matrix_rows = n; self }
-    pub fn feedback_every(mut self, n: u32) -> Self { self.feedback_every = n; self }
+    pub fn field(mut self, f: Field) -> Self {
+        self.field = f;
+        self
+    }
+    pub fn max_matrix_rows(mut self, n: usize) -> Self {
+        self.max_matrix_rows = n;
+        self
+    }
+    pub fn feedback_every(mut self, n: u32) -> Self {
+        self.feedback_every = n;
+        self
+    }
 
     pub fn build(self) -> Result<DecoderConfig> {
         if self.symbol_size == 0 || self.symbol_size > 65_535 {

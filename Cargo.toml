@@ -1,13 +1,16 @@
+[workspace]
+members = [".", "delp-cli"]
+
 [package]
 name = "delp"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
-description = "Delp — production-grade erasure-coding FEC protocol library for lossy networks, written in pure Rust"
-repository = "https://github.com/example/delp"
-keywords = ["fec", "erasure-coding", "network-coding", "forward-error-correction"]
-categories = ["network-programming", "algorithms"]
+description = "Delp — pure-Rust erasure-coding FEC for lossy networks. Sliding-window RLNC over GF(2⁴)/(2⁸) with SIMD acceleration (AVX2/SSSE3/NEON), Cauchy and Vandermonde matrix strategies, unlimited-length sessions via generation rotation, and Adaptive Loss-Targeted Coding (ALTC)."
+readme = "README.md"
+keywords = ["fec", "erasure-coding", "network-coding", "rlnc", "tetrys"]
+categories = ["network-programming", "algorithms", "no-std"]
 
 [features]
 default = ["std"]

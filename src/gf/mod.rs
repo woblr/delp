@@ -26,7 +26,9 @@ pub trait Field: sealed::Sealed + Copy + Eq + core::fmt::Debug {
     fn add(self, rhs: Self) -> Self;
     /// Subtraction — identical to addition in characteristic-2.
     #[inline(always)]
-    fn sub(self, rhs: Self) -> Self { self.add(rhs) }
+    fn sub(self, rhs: Self) -> Self {
+        self.add(rhs)
+    }
     /// Multiplication via precomputed log/exp tables.
     fn mul(self, rhs: Self) -> Self;
     /// Multiplicative inverse via log/exp tables.
@@ -36,7 +38,9 @@ pub trait Field: sealed::Sealed + Copy + Eq + core::fmt::Debug {
     fn inv(self) -> Self;
     /// Division: `self * rhs⁻¹`.
     #[inline(always)]
-    fn div(self, rhs: Self) -> Self { self.mul(rhs.inv()) }
+    fn div(self, rhs: Self) -> Self {
+        self.mul(rhs.inv())
+    }
 
     // ── Generators ──────────────────────────────────────────────────────
     /// `alpha ^ exp` where `alpha` is the primitive element (= 2).
@@ -65,18 +69,19 @@ mod sealed {
 }
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
 
     fn axioms<F: Field>() {
-        let one  = F::ONE;
+        let one = F::ONE;
         let zero = F::ZERO;
 
         // additive identity
         for raw in 0..(F::ORDER as u8) {
             let a = F::from_u8(raw);
             assert_eq!(a.add(zero), a, "a + 0 == a failed for {raw}");
-            assert_eq!(a.sub(a),   zero, "a - a == 0 failed for {raw}");
+            assert_eq!(a.sub(a), zero, "a - a == 0 failed for {raw}");
         }
 
         // multiplicative identity
@@ -108,8 +113,14 @@ mod tests {
         }
     }
 
-    #[test] fn gf2_4_axioms() { axioms::<Gf2_4>(); }
-    #[test] fn gf2_8_axioms() { axioms::<Gf2_8>(); }
+    #[test]
+    fn gf2_4_axioms() {
+        axioms::<Gf2_4>();
+    }
+    #[test]
+    fn gf2_8_axioms() {
+        axioms::<Gf2_8>();
+    }
 
     fn vandermonde_check<F: Field>() {
         // coded_id=1 → coefficients are alpha^(src_id * 1) = alpha^src_id
@@ -119,8 +130,14 @@ mod tests {
         }
     }
 
-    #[test] fn vandermonde_gf2_4() { vandermonde_check::<Gf2_4>(); }
-    #[test] fn vandermonde_gf2_8() { vandermonde_check::<Gf2_8>(); }
+    #[test]
+    fn vandermonde_gf2_4() {
+        vandermonde_check::<Gf2_4>();
+    }
+    #[test]
+    fn vandermonde_gf2_8() {
+        vandermonde_check::<Gf2_8>();
+    }
 
     // ── Exhaustive correctness proofs ────────────────────────────────────
 
@@ -129,12 +146,15 @@ mod tests {
     #[test]
     fn gf2_8_inv_exhaustive() {
         for v in 1u8..=255 {
-            let a   = Gf2_8::from_u8(v);
+            let a = Gf2_8::from_u8(v);
             let inv = a.inv();
-            assert_eq!(a.mul(inv), Gf2_8::ONE,
-                "GF(2^8): {v} * inv({v}) != 1  [inv={:?}]", inv);
-            assert_eq!(inv.mul(a), Gf2_8::ONE,
-                "GF(2^8): inv({v}) * {v} != 1");
+            assert_eq!(
+                a.mul(inv),
+                Gf2_8::ONE,
+                "GF(2^8): {v} * inv({v}) != 1  [inv={:?}]",
+                inv
+            );
+            assert_eq!(inv.mul(a), Gf2_8::ONE, "GF(2^8): inv({v}) * {v} != 1");
         }
     }
 
@@ -153,14 +173,16 @@ mod tests {
                 let expected: u8 = if a == 0 || b == 0 {
                     0
                 } else {
-                    GF2_8_EXP[GF2_8_LOG[a as usize] as usize
-                             + GF2_8_LOG[b as usize] as usize]
+                    GF2_8_EXP[GF2_8_LOG[a as usize] as usize + GF2_8_LOG[b as usize] as usize]
                 };
                 assert_eq!(got, expected, "GF(2^8) mul({a},{b}) mismatch");
 
                 // Commutativity
-                assert_eq!(fa.mul(fb), fb.mul(fa),
-                    "GF(2^8) mul not commutative at ({a},{b})");
+                assert_eq!(
+                    fa.mul(fb),
+                    fb.mul(fa),
+                    "GF(2^8) mul not commutative at ({a},{b})"
+                );
             }
         }
     }
@@ -169,8 +191,11 @@ mod tests {
     #[test]
     fn gf2_8_log_sentinel() {
         use super::tables::GF2_8_LOG;
-        assert_eq!(GF2_8_LOG[0], 0xFF,
-            "GF(2^8) LOG[0] must be 0xFF sentinel, got {}", GF2_8_LOG[0]);
+        assert_eq!(
+            GF2_8_LOG[0], 0xFF,
+            "GF(2^8) LOG[0] must be 0xFF sentinel, got {}",
+            GF2_8_LOG[0]
+        );
     }
 
     /// EXP and LOG are true inverses: EXP[LOG[x]] == x for all x in 1..=255.
@@ -179,13 +204,19 @@ mod tests {
         use super::tables::{GF2_8_EXP, GF2_8_LOG};
         for x in 1u8..=255 {
             let log_x = GF2_8_LOG[x as usize] as usize;
-            assert_eq!(GF2_8_EXP[log_x], x,
-                "EXP[LOG[{x}]] != {x}  (got {})", GF2_8_EXP[log_x]);
+            assert_eq!(
+                GF2_8_EXP[log_x], x,
+                "EXP[LOG[{x}]] != {x}  (got {})",
+                GF2_8_EXP[log_x]
+            );
         }
         for i in 0usize..255 {
             let exp_i = GF2_8_EXP[i] as usize;
-            assert_eq!(GF2_8_LOG[exp_i], i as u8,
-                "LOG[EXP[{i}]] != {i}  (got {})", GF2_8_LOG[exp_i]);
+            assert_eq!(
+                GF2_8_LOG[exp_i], i as u8,
+                "LOG[EXP[{i}]] != {i}  (got {})",
+                GF2_8_LOG[exp_i]
+            );
         }
     }
 
@@ -193,10 +224,14 @@ mod tests {
     #[test]
     fn gf2_4_inv_exhaustive() {
         for v in 1u8..16 {
-            let a   = Gf2_4::from_u8(v);
+            let a = Gf2_4::from_u8(v);
             let inv = a.inv();
-            assert_eq!(a.mul(inv), Gf2_4::ONE,
-                "GF(2^4): {v} * inv({v}) != 1  [inv={}]", inv.to_u8());
+            assert_eq!(
+                a.mul(inv),
+                Gf2_4::ONE,
+                "GF(2^4): {v} * inv({v}) != 1  [inv={}]",
+                inv.to_u8()
+            );
         }
     }
 
@@ -207,8 +242,7 @@ mod tests {
         for x in 1u8..16 {
             let log_x = GF2_4_LOG[x as usize] as usize;
             assert!(log_x < 15, "LOG[{x}] out of range: {log_x}");
-            assert_eq!(GF2_4_EXP[log_x], x,
-                "EXP[LOG[{x}]] != {x}");
+            assert_eq!(GF2_4_EXP[log_x], x, "EXP[LOG[{x}]] != {x}");
         }
     }
 
@@ -231,17 +265,20 @@ mod tests {
         // Non-zero iff (s1-s0)*(c2-c1) ≢ 0 (mod 255), i.e., neither factor
         // is 0 mod 255 (guaranteed by s0 != s1, c1 != c2, and small values).
         for s0 in 0u32..8 {
-            for s1 in (s0+1)..8 {
+            for s1 in (s0 + 1)..8 {
                 for c1 in 1u32..8 {
-                    for c2 in (c1+1)..8 {
+                    for c2 in (c1 + 1)..8 {
                         let a00 = Gf2_8::vandermonde(s0, c1);
                         let a01 = Gf2_8::vandermonde(s1, c1);
                         let a10 = Gf2_8::vandermonde(s0, c2);
                         let a11 = Gf2_8::vandermonde(s1, c2);
                         // det = a00*a11 + a01*a10  (XOR in char 2)
                         let det = a00.mul(a11).add(a01.mul(a10));
-                        assert_ne!(det, Gf2_8::ZERO,
-                            "Vandermonde 2×2 singular at s=({s0},{s1}) c=({c1},{c2})");
+                        assert_ne!(
+                            det,
+                            Gf2_8::ZERO,
+                            "Vandermonde 2×2 singular at s=({s0},{s1}) c=({c1},{c2})"
+                        );
                     }
                 }
             }

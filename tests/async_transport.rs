@@ -26,7 +26,12 @@ mod tests {
 
     // ── helpers ──────────────────────────────────────────────────────────
 
-    async fn loopback_pair() -> (Arc<UdpSocket>, Arc<UdpSocket>, std::net::SocketAddr, std::net::SocketAddr) {
+    async fn loopback_pair() -> (
+        Arc<UdpSocket>,
+        Arc<UdpSocket>,
+        std::net::SocketAddr,
+        std::net::SocketAddr,
+    ) {
         let tx_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let rx_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let tx_addr = tx_sock.local_addr().unwrap();
@@ -47,7 +52,12 @@ mod tests {
             .matrix_strategy(MatrixStrategy::Vandermonde)
             .build()
             .unwrap();
-        Encoder::new(cfg, AnyAckPolicy, NoCongestionControl, ConstantFecRate::new(fec_numer, fec_denom))
+        Encoder::new(
+            cfg,
+            AnyAckPolicy,
+            NoCongestionControl,
+            ConstantFecRate::new(fec_numer, fec_denom),
+        )
     }
 
     /// Decoder with periodic feedback (default period = 4 packets).
@@ -73,14 +83,14 @@ mod tests {
     #[tokio::test]
     async fn round_trip_no_loss() {
         const SYM: usize = 256;
-        const N: usize   = 8;
+        const N: usize = 8;
 
         let (tx_sock, rx_sock, tx_addr, rx_addr) = loopback_pair().await;
 
-        let encoder = make_encoder(SYM, N, 1, 2);  // 50% FEC
+        let encoder = make_encoder(SYM, N, 1, 2); // 50% FEC
         let decoder = make_decoder(SYM);
 
-        let mut sender   = FecSender::new(encoder, tx_sock, rx_addr);
+        let mut sender = FecSender::new(encoder, tx_sock, rx_addr);
         let mut receiver = FecReceiver::new(decoder, rx_sock, tx_addr);
 
         // Send N symbols.
@@ -90,10 +100,8 @@ mod tests {
 
         // Receive all N symbols with a timeout.
         for i in 0..N as u8 {
-            let (id, data) = timeout(
-                Duration::from_secs(2),
-                receiver.recv_source(),
-            ).await
+            let (id, data) = timeout(Duration::from_secs(2), receiver.recv_source())
+                .await
                 .expect("timed out waiting for symbol")
                 .unwrap();
             assert_eq!(id, i as u32);
@@ -104,23 +112,23 @@ mod tests {
     /// Source packets are all dropped; FEC coded packets carry recovery.
     #[tokio::test]
     async fn round_trip_with_source_packet_loss() {
-        const SYM: usize   = 512;
-        const N: usize     = 6;
+        const SYM: usize = 512;
+        const N: usize = 6;
         // 1:1 FEC → N source + N coded = 2N datagrams hit the proxy.
         const TOTAL: usize = N * 2;
 
-        let tx_sock  = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let rx_sock  = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let tx_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let rx_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let prx_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
 
-        let tx_addr  = tx_sock.local_addr().unwrap();
-        let rx_addr  = rx_sock.local_addr().unwrap();
+        let tx_addr = tx_sock.local_addr().unwrap();
+        let rx_addr = rx_sock.local_addr().unwrap();
         let prx_addr = prx_sock.local_addr().unwrap();
 
         let encoder = make_encoder(SYM, N, 1, 1);
         let decoder = make_decoder(SYM);
 
-        let mut sender   = FecSender::new(encoder, tx_sock, prx_addr);
+        let mut sender = FecSender::new(encoder, tx_sock, prx_addr);
         let mut receiver = FecReceiver::new(decoder, rx_sock, tx_addr);
 
         // Async proxy: receive TOTAL packets, drop source, forward coded.
@@ -145,7 +153,9 @@ mod tests {
         }
 
         let fwd = timeout(Duration::from_secs(5), proxy_task)
-            .await.expect("proxy task timed out").unwrap();
+            .await
+            .expect("proxy task timed out")
+            .unwrap();
         assert_eq!(fwd, N, "expected {N} coded pkts forwarded, got {fwd}");
 
         // All N symbols must be recoverable from coded packets alone.
@@ -161,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn feedback_reaches_sender() {
         const SYM: usize = 64;
-        const N: usize   = 4;
+        const N: usize = 4;
 
         let (tx_sock, rx_sock, tx_addr, rx_addr) = loopback_pair().await;
 
@@ -170,7 +180,7 @@ mod tests {
         // sender receives at least one within the small N=4 test window.
         let decoder = make_decoder_immediate(SYM);
 
-        let mut sender   = FecSender::new(encoder, tx_sock, rx_addr);
+        let mut sender = FecSender::new(encoder, tx_sock, rx_addr);
         let mut receiver = FecReceiver::new(decoder, rx_sock, tx_addr);
 
         for i in 0..N as u8 {
@@ -180,7 +190,9 @@ mod tests {
         // Drain all received symbols (this also sends feedback).
         for _ in 0..N {
             timeout(Duration::from_secs(2), receiver.recv_source())
-                .await.unwrap().unwrap();
+                .await
+                .unwrap()
+                .unwrap();
         }
 
         // Sender should receive at least one feedback packet.
@@ -197,14 +209,14 @@ mod tests {
         use futures_util::StreamExt;
 
         const SYM: usize = 128;
-        const N: usize   = 4;
+        const N: usize = 4;
 
         let (tx_sock, rx_sock, tx_addr, rx_addr) = loopback_pair().await;
 
         let encoder = make_encoder(SYM, N, 0, 1); // no FEC, source only
         let decoder = make_decoder(SYM);
 
-        let mut sender   = FecSender::new(encoder, tx_sock, rx_addr);
+        let mut sender = FecSender::new(encoder, tx_sock, rx_addr);
         let mut receiver = FecReceiver::new(decoder, rx_sock, tx_addr);
 
         for i in 0..N as u8 {

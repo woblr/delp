@@ -1,3 +1,9 @@
+// `DelpPacket` is an enum where one variant owns parsed `FeedbackPacket`
+// data while others are zero-copy `&'a [u8]` views.  The size imbalance is
+// intentional — flattening it would force heap allocation on the hot
+// zero-copy paths.
+#![allow(clippy::large_enum_variant)]
+
 //! # delp
 //!
 //! **Delp** is a production-grade, pure-Rust FEC (forward error correction)
@@ -94,35 +100,29 @@
 //! - **Compile-time GF tables** — log/exp/mul tables are `const fn`; zero
 //!   runtime initialisation cost.
 
+pub mod codec;
 pub mod config;
 pub mod error;
 pub mod gf;
-pub mod wire;
 pub mod policy;
-pub mod codec;
+pub mod wire;
 
 #[cfg(feature = "async")]
 pub mod transport;
 
 // ── Top-level convenience re-exports ─────────────────────────────────────
 
-pub use config::{EncoderConfig, DecoderConfig, Field, BackpressureMode, MatrixStrategy};
+pub use config::{BackpressureMode, DecoderConfig, EncoderConfig, Field, MatrixStrategy};
 pub use error::{DelpError, Result};
 
-pub use codec::{
-    DefaultEncoder, DefaultDecoder,
-    EncoderOutput, DecoderEvent,
-    Encoder, Decoder,
-};
+pub use codec::{Decoder, DecoderEvent, DefaultDecoder, DefaultEncoder, Encoder, EncoderOutput};
 
 pub use policy::{
-    WindowPolicy, CongestionControl, FecRateController, FeedbackPolicy,
-    ReceiverAckState, SourceSymbolId, CodedSymbolId, ReceiverId,
+    CodedSymbolId, CongestionControl, FecRateController, FeedbackPolicy, ReceiverAckState,
+    ReceiverId, SourceSymbolId, WindowPolicy,
 };
 
 pub use policy::defaults::{
-    AnyAckPolicy, AllAckPolicy, QuorumAckPolicy,
-    NoCongestionControl,
-    ConstantFecRate, AdaptiveFecRate,
-    ConstantFeedbackPolicy, ImmediateFeedbackPolicy,
+    AdaptiveFecRate, AllAckPolicy, AnyAckPolicy, ConstantFecRate, ConstantFeedbackPolicy,
+    ImmediateFeedbackPolicy, NoCongestionControl, QuorumAckPolicy,
 };

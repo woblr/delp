@@ -6,13 +6,9 @@ use std::collections::BTreeMap;
 use tracing::{debug, trace};
 
 use crate::config::DecoderConfig;
-use crate::error::{Result, DelpError};
-use crate::policy::{FeedbackPolicy, DecoderState, SourceSymbolId};
-use crate::wire::{
-    feedback::FeedbackPacket,
-    source::SourcePacket,
-    coded::CodedPacket,
-};
+use crate::error::{DelpError, Result};
+use crate::policy::{DecoderState, FeedbackPolicy, SourceSymbolId};
+use crate::wire::{coded::CodedPacket, feedback::FeedbackPacket, source::SourcePacket};
 use buffer::SymbolBuffer;
 use matrix::DecodingMatrix;
 
@@ -34,24 +30,27 @@ pub enum DecoderEvent {
     /// A gap has opened that cannot be recovered — the encoder's window
     /// has advanced past these symbols.  The application must decide how
     /// to handle missing data (e.g. request retransmission at a higher level).
-    UnrecoverableGap { first_missing: SourceSymbolId, count: u32 },
+    UnrecoverableGap {
+        first_missing: SourceSymbolId,
+        count: u32,
+    },
 }
 
 // ── Loss tracker ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
 struct LossTracker {
-    received:  u64,
-    expected:  u64,
+    received: u64,
+    expected: u64,
     last_seen: u32,
 }
 
 impl LossTracker {
     fn on_source(&mut self, id: u32) {
-        self.received  += 1;
-        let gap         = id.wrapping_sub(self.last_seen).min(1000) as u64;
-        self.expected  += gap;
-        self.last_seen  = id;
+        self.received += 1;
+        let gap = id.wrapping_sub(self.last_seen).min(1000) as u64;
+        self.expected += gap;
+        self.last_seen = id;
     }
 
     fn on_coded(&mut self) {
@@ -60,7 +59,9 @@ impl LossTracker {
     }
 
     fn loss_rate(&self) -> f64 {
-        if self.expected == 0 { return 0.0; }
+        if self.expected == 0 {
+            return 0.0;
+        }
         let lost = self.expected.saturating_sub(self.received);
         (lost as f64 / self.expected as f64).clamp(0.0, 1.0)
     }
@@ -77,14 +78,14 @@ impl LossTracker {
 /// Feed packets in (possibly out of order, possibly with gaps) and
 /// collect [`DecoderEvent`]s.
 pub struct Decoder<P: FeedbackPolicy> {
-    config:          DecoderConfig,
-    buffer:          SymbolBuffer,
-    matrix:          DecodingMatrix,
+    config: DecoderConfig,
+    buffer: SymbolBuffer,
+    matrix: DecodingMatrix,
     /// Known source symbols (received directly + recovered).
-    known:           BTreeMap<SourceSymbolId, Bytes>,
+    known: BTreeMap<SourceSymbolId, Bytes>,
     /// Lowest source ID the encoder may still have in its window.
     encoder_win_min: SourceSymbolId,
-    loss:            LossTracker,
+    loss: LossTracker,
     feedback_policy: P,
     packets_received: u64,
 }
@@ -93,15 +94,15 @@ impl<P: FeedbackPolicy> Decoder<P> {
     // ── Construction ─────────────────────────────────────────────────────
 
     pub fn new(config: DecoderConfig, feedback_policy: P) -> Self {
-        let sym_size  = config.symbol_size;
-        let field     = config.field;
-        let max_rows  = config.max_matrix_rows;
+        let sym_size = config.symbol_size;
+        let field = config.field;
+        let max_rows = config.max_matrix_rows;
         Self {
-            buffer:          SymbolBuffer::new(0),
-            matrix:          DecodingMatrix::new(field, sym_size, max_rows),
-            known:           BTreeMap::new(),
+            buffer: SymbolBuffer::new(0),
+            matrix: DecodingMatrix::new(field, sym_size, max_rows),
+            known: BTreeMap::new(),
             encoder_win_min: 0,
-            loss:            LossTracker::default(),
+            loss: LossTracker::default(),
             feedback_policy,
             packets_received: 0,
             config,
@@ -115,7 +116,7 @@ impl<P: FeedbackPolicy> Decoder<P> {
         if pkt.payload.len() != self.config.symbol_size {
             return Err(DelpError::SymbolSizeMismatch {
                 expected: self.config.symbol_size,
-                actual:   pkt.payload.len(),
+                actual: pkt.payload.len(),
             });
         }
 
@@ -150,7 +151,7 @@ impl<P: FeedbackPolicy> Decoder<P> {
         if pkt.payload.len() != self.config.symbol_size {
             return Err(DelpError::SymbolSizeMismatch {
                 expected: self.config.symbol_size,
-                actual:   pkt.payload.len(),
+                actual: pkt.payload.len(),
             });
         }
 
@@ -166,7 +167,7 @@ impl<P: FeedbackPolicy> Decoder<P> {
         }
 
         let mut events = Vec::new();
-        let recovered  = self.matrix.add_coded(&pkt.ev, pkt.payload, &self.known)?;
+        let recovered = self.matrix.add_coded(&pkt.ev, pkt.payload, &self.known)?;
         for (rid, rdata) in recovered {
             self.absorb_recovered(rid, rdata, &mut events);
         }
@@ -184,15 +185,19 @@ impl<P: FeedbackPolicy> Decoder<P> {
         self.buffer.next_delivery_id
     }
 
-    pub fn loss_rate(&self) -> f64 { self.loss.loss_rate() }
-    pub fn packets_received(&self) -> u64 { self.packets_received }
+    pub fn loss_rate(&self) -> f64 {
+        self.loss.loss_rate()
+    }
+    pub fn packets_received(&self) -> u64 {
+        self.packets_received
+    }
 
     // ── Internals ────────────────────────────────────────────────────────
 
     fn absorb_recovered(
         &mut self,
-        id:     SourceSymbolId,
-        data:   Bytes,
+        id: SourceSymbolId,
+        data: Bytes,
         _events: &mut Vec<DecoderEvent>,
     ) {
         debug!(id, "recovered source symbol");
@@ -208,9 +213,11 @@ impl<P: FeedbackPolicy> Decoder<P> {
 
     fn maybe_send_feedback(&mut self, events: &mut Vec<DecoderEvent>) {
         let state = self.make_state();
-        if !self.feedback_policy.should_send_feedback(state) { return; }
+        if !self.feedback_policy.should_send_feedback(state) {
+            return;
+        }
 
-        let next  = self.buffer.next_delivery_id;
+        let next = self.buffer.next_delivery_id;
         let acked: Vec<u32> = self.buffer.ids_from(next).take(256).collect();
         let nb_missing = self.count_missing();
 
@@ -241,18 +248,20 @@ impl<P: FeedbackPolicy> Decoder<P> {
     fn count_missing(&self) -> u32 {
         let next = self.buffer.next_delivery_id;
         let high = self.buffer.highest_id().unwrap_or(next);
-        if high < next { return 0; }
-        let span       = (high - next + 1) as u32;
-        let buffered   = self.buffer.ids_from(next).count() as u32;
+        if high < next {
+            return 0;
+        }
+        let span = high - next + 1;
+        let buffered = self.buffer.ids_from(next).count() as u32;
         span.saturating_sub(buffered)
     }
 
     fn make_state(&self) -> DecoderState {
         DecoderState {
-            next_delivery_id:  self.buffer.next_delivery_id,
-            packets_received:  self.packets_received,
-            loss_rate:         self.loss.loss_rate(),
-            nb_missing_src:    self.count_missing(),
+            next_delivery_id: self.buffer.next_delivery_id,
+            packets_received: self.packets_received,
+            loss_rate: self.loss.loss_rate(),
+            nb_missing_src: self.count_missing(),
             nb_not_used_coded: self.matrix.row_count() as u32,
         }
     }
@@ -274,10 +283,10 @@ impl DefaultDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
-    use crate::config::{EncoderConfig, DecoderConfig, Field};
     use crate::codec::encoder::{DefaultEncoder, EncoderOutput};
-    use crate::wire::{source::SourcePacket, coded::CodedPacket};
+    use crate::config::{DecoderConfig, EncoderConfig, Field};
+    use crate::wire::{coded::CodedPacket, source::SourcePacket};
+    use bytes::Bytes;
 
     fn run_round_trip(
         sym_size: usize,
@@ -318,7 +327,9 @@ mod tests {
 
         let mut delivered: Vec<(SourceSymbolId, Bytes)> = Vec::new();
         for (i, pkt) in all_pkts.iter().enumerate() {
-            if drop_indices.contains(&i) { continue; }
+            if drop_indices.contains(&i) {
+                continue;
+            }
             // Determine type from header byte 3
             let pkt_type = pkt[3];
             let events = if pkt_type == 0x00 {
@@ -369,8 +380,8 @@ mod tests {
         let cfg = DecoderConfig::builder(64).build().unwrap();
         let mut dec = DefaultDecoder::with_defaults(cfg);
         // Craft a source packet with wrong payload size
-        let raw = SourcePacket::serialise(0, &vec![0u8; 32], &[], None);
-        let sp  = SourcePacket::parse(&raw).unwrap();
+        let raw = SourcePacket::serialise(0, &[0u8; 32], &[], None);
+        let sp = SourcePacket::parse(&raw).unwrap();
         let err = dec.handle_source(&sp);
         assert!(matches!(err, Err(DelpError::SymbolSizeMismatch { .. })));
     }

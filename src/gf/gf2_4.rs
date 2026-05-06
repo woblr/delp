@@ -1,4 +1,7 @@
-use super::{Field, tables::{GF2_4_EXP, GF2_4_LOG, GF2_4_ORDER}};
+use super::{
+    tables::{GF2_4_EXP, GF2_4_LOG, GF2_4_ORDER},
+    Field,
+};
 
 /// An element of GF(2⁴).
 ///
@@ -19,7 +22,9 @@ impl Gf2_4 {
 
     /// Raw nibble value.
     #[inline(always)]
-    pub const fn value(self) -> u8 { self.0 }
+    pub const fn value(self) -> u8 {
+        self.0
+    }
 
     // ── Packed-byte helpers ──────────────────────────────────────────────
 
@@ -30,10 +35,10 @@ impl Gf2_4 {
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn mul_packed_byte(byte: u8, coef: u8) -> u8 {
-        let hi_in  = (byte >> 4) & 0x0F;
-        let lo_in  = byte & 0x0F;
-        let c_hi   = (coef >> 4) & 0x0F;
-        let c_lo   = coef & 0x0F;
+        let hi_in = (byte >> 4) & 0x0F;
+        let lo_in = byte & 0x0F;
+        let c_hi = (coef >> 4) & 0x0F;
+        let c_lo = coef & 0x0F;
         let hi_out = gf2_4_mul_raw(hi_in, c_hi);
         let lo_out = gf2_4_mul_raw(lo_in, c_lo);
         (hi_out << 4) | lo_out
@@ -50,19 +55,23 @@ impl Gf2_4 {
 /// Scalar multiply two raw nibble values (0..15) in GF(2^4).
 #[inline(always)]
 fn gf2_4_mul_raw(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 { return 0; }
+    if a == 0 || b == 0 {
+        return 0;
+    }
     let sum = GF2_4_LOG[a as usize] as usize + GF2_4_LOG[b as usize] as usize;
     GF2_4_EXP[sum % (GF2_4_ORDER - 1)]
 }
 
 impl Field for Gf2_4 {
-    const ORDER: usize    = GF2_4_ORDER;
-    const COEF_BITS: u8   = 4;
-    const ZERO: Self      = Self(0);
-    const ONE: Self       = Self(1);
+    const ORDER: usize = GF2_4_ORDER;
+    const COEF_BITS: u8 = 4;
+    const ZERO: Self = Self(0);
+    const ONE: Self = Self(1);
 
     #[inline(always)]
-    fn add(self, rhs: Self) -> Self { Self(self.0 ^ rhs.0) }
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 ^ rhs.0)
+    }
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
@@ -72,7 +81,10 @@ impl Field for Gf2_4 {
     #[inline(always)]
     fn inv(self) -> Self {
         // Same rationale as GF(2^8): assert in both debug and release.
-        assert_ne!(self.0, 0, "GF(2^4): inversion of the zero element is undefined");
+        assert_ne!(
+            self.0, 0,
+            "GF(2^4): inversion of the zero element is undefined"
+        );
         // inv(a) = alpha^(15 - log(a));  LOG[0] = 0xFF (sentinel — never reached here)
         let log_a = GF2_4_LOG[self.0 as usize] as usize;
         debug_assert_ne!(log_a, 0xFF, "GF2_4 LOG sentinel leaked into inv path");
@@ -85,10 +97,14 @@ impl Field for Gf2_4 {
     }
 
     #[inline(always)]
-    fn from_u8(v: u8) -> Self { Self(v & 0x0F) }
+    fn from_u8(v: u8) -> Self {
+        Self(v & 0x0F)
+    }
 
     #[inline(always)]
-    fn to_u8(self) -> u8 { self.0 }
+    fn to_u8(self) -> u8 {
+        self.0
+    }
 }
 
 #[cfg(test)]

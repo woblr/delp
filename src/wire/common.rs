@@ -1,5 +1,5 @@
-use zerocopy::{FromBytes, IntoBytes, KnownLayout, Immutable};
-use crate::error::{Result, DelpError};
+use crate::error::{DelpError, Result};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Binary common header — 4 bytes, present in every packet type.
 ///
@@ -15,28 +15,26 @@ use crate::error::{Result, DelpError};
 #[derive(Debug, Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct CommonHeader {
-    pub(crate) flags:        u8,  // [V:4][C:2][S:1][Rsvd:1]
-    pub(crate) reserved:     u8,
+    pub(crate) flags: u8, // [V:4][C:2][S:1][Rsvd:1]
+    pub(crate) reserved: u8,
     pub(crate) hdr_len_words: u8, // total header length in 32-bit words
-    pub(crate) pkt_type:     u8,
+    pub(crate) pkt_type: u8,
 }
 
 impl CommonHeader {
-    pub const SIZE: usize  = 4;
-    pub const VERSION: u8  = 1;
+    pub const SIZE: usize = 4;
+    pub const VERSION: u8 = 1;
 
     // ── Construction ────────────────────────────────────────────────────
 
-    pub fn new(
-        pkt_type:      PacketType,
-        cci:           CciLength,
-        has_tsi:       bool,
-        hdr_len_words: u8,
-    ) -> Self {
-        let flags = (Self::VERSION << 4)
-            | ((cci as u8) << 2)
-            | ((has_tsi as u8) << 1);
-        Self { flags, reserved: 0, hdr_len_words, pkt_type: pkt_type as u8 }
+    pub fn new(pkt_type: PacketType, cci: CciLength, has_tsi: bool, hdr_len_words: u8) -> Self {
+        let flags = (Self::VERSION << 4) | ((cci as u8) << 2) | ((has_tsi as u8) << 1);
+        Self {
+            flags,
+            reserved: 0,
+            hdr_len_words,
+            pkt_type: pkt_type as u8,
+        }
     }
 
     #[inline]
@@ -53,15 +51,15 @@ impl CommonHeader {
     pub fn parse(buf: &[u8]) -> Result<Self> {
         if buf.len() < Self::SIZE {
             return Err(DelpError::BufferTooShort {
-                needed:    Self::SIZE,
+                needed: Self::SIZE,
                 available: buf.len(),
             });
         }
 
         // zerocopy: safe cast — CommonHeader is FromBytes + repr(C)
-        let hdr = *Self::ref_from_bytes(&buf[..Self::SIZE])
-            .map_err(|_| DelpError::BufferTooShort {
-                needed:    Self::SIZE,
+        let hdr =
+            *Self::ref_from_bytes(&buf[..Self::SIZE]).map_err(|_| DelpError::BufferTooShort {
+                needed: Self::SIZE,
                 available: buf.len(),
             })?;
 
@@ -74,7 +72,7 @@ impl CommonHeader {
         if hdr_len_bytes > buf.len() {
             return Err(DelpError::InvalidHeaderLength {
                 hdr_len_words: hdr.hdr_len_words,
-                packet_len:    buf.len(),
+                packet_len: buf.len(),
             });
         }
 
@@ -83,10 +81,22 @@ impl CommonHeader {
 
     // ── Field accessors ──────────────────────────────────────────────────
 
-    #[inline] pub fn version(self) -> u8         { self.flags >> 4 }
-    #[inline] pub fn cci_words(self) -> u8        { (self.flags >> 2) & 0x3 }
-    #[inline] pub fn has_tsi(self) -> bool        { (self.flags >> 1) & 0x1 == 1 }
-    #[inline] pub fn hdr_len_bytes(self) -> usize { self.hdr_len_words as usize * 4 }
+    #[inline]
+    pub fn version(self) -> u8 {
+        self.flags >> 4
+    }
+    #[inline]
+    pub fn cci_words(self) -> u8 {
+        (self.flags >> 2) & 0x3
+    }
+    #[inline]
+    pub fn has_tsi(self) -> bool {
+        (self.flags >> 1) & 0x1 == 1
+    }
+    #[inline]
+    pub fn hdr_len_bytes(self) -> usize {
+        self.hdr_len_words as usize * 4
+    }
 
     pub fn packet_type(self) -> Result<PacketType> {
         PacketType::from_u8(self.pkt_type)
@@ -99,9 +109,7 @@ impl CommonHeader {
     /// Byte offset of the type-specific body (after CCI + optional TSI).
     #[inline]
     pub fn body_offset(self) -> usize {
-        Self::SIZE
-            + self.cci_words() as usize * 4
-            + if self.has_tsi() { 4 } else { 0 }
+        Self::SIZE + self.cci_words() as usize * 4 + if self.has_tsi() { 4 } else { 0 }
     }
 }
 
@@ -110,8 +118,8 @@ impl CommonHeader {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PacketType {
-    Source   = 0x00,
-    Coded    = 0x01,
+    Source = 0x00,
+    Coded = 0x01,
     Feedback = 0x02,
 }
 
@@ -121,7 +129,7 @@ impl PacketType {
             0x00 => Ok(Self::Source),
             0x01 => Ok(Self::Coded),
             0x02 => Ok(Self::Feedback),
-            _    => Err(DelpError::UnknownPacketType(v)),
+            _ => Err(DelpError::UnknownPacketType(v)),
         }
     }
 }
@@ -133,9 +141,9 @@ impl PacketType {
 #[repr(u8)]
 pub enum CciLength {
     #[default]
-    Zero  = 0,
-    One   = 1,
-    Two   = 2,
+    Zero = 0,
+    One = 1,
+    Two = 2,
     Three = 3,
 }
 
@@ -148,8 +156,12 @@ impl CciLength {
             _ => Self::Three,
         }
     }
-    pub fn words(self) -> u8  { self as u8 }
-    pub fn bytes(self) -> usize { self as usize * 4 }
+    pub fn words(self) -> u8 {
+        self as u8
+    }
+    pub fn bytes(self) -> usize {
+        self as usize * 4
+    }
 }
 
 #[cfg(test)]
@@ -161,11 +173,11 @@ mod tests {
         let hdr = CommonHeader::new(PacketType::Source, CciLength::Zero, false, 1);
         let bytes = hdr.to_bytes();
         let parsed = CommonHeader::parse(&bytes).unwrap();
-        assert_eq!(parsed.version(),              1);
+        assert_eq!(parsed.version(), 1);
         assert_eq!(parsed.packet_type().unwrap(), PacketType::Source);
-        assert_eq!(parsed.cci_words(),            0);
-        assert_eq!(parsed.has_tsi(),              false);
-        assert_eq!(parsed.hdr_len_words,          1);
+        assert_eq!(parsed.cci_words(), 0);
+        assert!(!parsed.has_tsi());
+        assert_eq!(parsed.hdr_len_words, 1);
     }
 
     #[test]
@@ -202,8 +214,8 @@ mod tests {
     #[test]
     fn zerocopy_ref_from_bytes() {
         // Verify zerocopy parsing gives same result as manual construction
-        let hdr  = CommonHeader::new(PacketType::Feedback, CciLength::One, false, 2);
-        let raw  = hdr.to_bytes();
+        let hdr = CommonHeader::new(PacketType::Feedback, CciLength::One, false, 2);
+        let raw = hdr.to_bytes();
         let hdr2 = CommonHeader::ref_from_bytes(&raw).unwrap();
         assert_eq!(hdr2.version(), hdr.version());
         assert_eq!(hdr2.cci_words(), hdr.cci_words());

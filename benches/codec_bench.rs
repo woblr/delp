@@ -8,13 +8,10 @@
 //!   - Vandermonde vs Cauchy coefficient strategies
 //!   - symbol_size × window_size matrix at realistic MTU sizes
 
-use criterion::{
-    black_box, criterion_group, criterion_main,
-    BenchmarkId, Criterion, Throughput,
-};
 use bytes::Bytes;
-use delp::config::{EncoderConfig, MatrixStrategy, Field};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use delp::codec::encoder::DefaultEncoder;
+use delp::config::{EncoderConfig, Field, MatrixStrategy};
 
 // ── Helper: build a pre-loaded encoder ───────────────────────────────────
 
@@ -25,7 +22,7 @@ fn make_loaded_encoder(sym_size: usize, n_src: usize, strategy: MatrixStrategy) 
     };
     let cfg = EncoderConfig::builder(sym_size)
         .window_capacity(cap)
-        .fec_rate(0, 1)   // FEC disabled during submit — we call generate_coded manually
+        .fec_rate(0, 1) // FEC disabled during submit — we call generate_coded manually
         .matrix_strategy(strategy)
         .build()
         .unwrap();
@@ -57,9 +54,7 @@ fn bench_generate_coded(c: &mut Criterion) {
             |b, &(sz, n)| {
                 b.iter_with_setup(
                     || make_loaded_encoder(sz, n, MatrixStrategy::Vandermonde),
-                    |mut enc| {
-                        black_box(enc.generate_coded().unwrap())
-                    },
+                    |mut enc| black_box(enc.generate_coded().unwrap()),
                 );
             },
         );
@@ -72,9 +67,7 @@ fn bench_generate_coded(c: &mut Criterion) {
                 |b, &(sz, n)| {
                     b.iter_with_setup(
                         || make_loaded_encoder(sz, n, MatrixStrategy::Cauchy),
-                        |mut enc| {
-                            black_box(enc.generate_coded().unwrap())
-                        },
+                        |mut enc| black_box(enc.generate_coded().unwrap()),
                     );
                 },
             );
@@ -107,9 +100,7 @@ fn bench_submit_source_pipeline(c: &mut Criterion) {
                 b.iter(|| {
                     let mut enc = DefaultEncoder::with_defaults(cfg.clone());
                     for _ in 0..n {
-                        black_box(
-                            enc.submit_source(Bytes::from(payload.clone())).unwrap()
-                        );
+                        black_box(enc.submit_source(Bytes::from(payload.clone())).unwrap());
                     }
                 });
             },
@@ -123,7 +114,7 @@ fn bench_submit_source_pipeline(c: &mut Criterion) {
 fn bench_field_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("field_comparison");
     let sym_size = 64usize;
-    let n_src    = 8usize;
+    let n_src = 8usize;
 
     group.throughput(Throughput::Bytes((sym_size * n_src) as u64));
 

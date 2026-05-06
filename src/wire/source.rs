@@ -1,5 +1,5 @@
-use crate::error::{Result, DelpError};
 use super::common::{CommonHeader, PacketType};
+use crate::error::{DelpError, Result};
 
 /// Delp protocol §5.1 — Source Packet.
 ///
@@ -10,13 +10,13 @@ use super::common::{CommonHeader, PacketType};
 /// The payload is a zero-copy `Bytes` slice referencing the original buffer.
 #[derive(Debug, Clone)]
 pub struct SourcePacket<'a> {
-    pub header:           CommonHeader,
+    pub header: CommonHeader,
     /// Raw CCI bytes (0, 4, 8, or 12 bytes).
-    pub cci:              &'a [u8],
+    pub cci: &'a [u8],
     /// Transport Session Identifier (present when `header.has_tsi()` is true).
-    pub tsi:              Option<u32>,
+    pub tsi: Option<u32>,
     pub source_symbol_id: u32,
-    pub payload:          &'a [u8],
+    pub payload: &'a [u8],
 }
 
 impl<'a> SourcePacket<'a> {
@@ -34,7 +34,7 @@ impl<'a> SourcePacket<'a> {
         let body_off = header.body_offset();
         if buf.len() < body_off + Self::BODY_MIN {
             return Err(DelpError::BufferTooShort {
-                needed:    body_off + Self::BODY_MIN,
+                needed: body_off + Self::BODY_MIN,
                 available: buf.len(),
             });
         }
@@ -52,7 +52,13 @@ impl<'a> SourcePacket<'a> {
         let source_symbol_id = u32::from_be_bytes(buf[id_off..id_off + 4].try_into().unwrap());
         let payload = &buf[id_off + 4..];
 
-        Ok(Self { header, cci, tsi, source_symbol_id, payload })
+        Ok(Self {
+            header,
+            cci,
+            tsi,
+            source_symbol_id,
+            payload,
+        })
     }
 
     // ── Serialisation ────────────────────────────────────────────────────
@@ -68,7 +74,7 @@ impl<'a> SourcePacket<'a> {
     ) -> Vec<u8> {
         assert!(cci_bytes.len() % 4 == 0 && cci_bytes.len() <= 12);
         let cci_words = (cci_bytes.len() / 4) as u8;
-        let has_tsi   = tsi.is_some();
+        let has_tsi = tsi.is_some();
 
         // hdr_len in 32-bit words:
         //   1 (common) + cci_words + (1 if tsi) + 1 (src_id)

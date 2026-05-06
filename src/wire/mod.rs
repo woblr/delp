@@ -1,16 +1,16 @@
-pub mod common;
-pub mod source;
 pub mod coded;
-pub mod feedback;
+pub mod common;
 pub mod ev;
+pub mod feedback;
+pub mod source;
 
-pub use common::{CommonHeader, PacketType, CciLength};
-pub use source::SourcePacket;
 pub use coded::CodedPacket;
-pub use feedback::FeedbackPacket;
+pub use common::{CciLength, CommonHeader, PacketType};
 pub use ev::EncodingVector;
+pub use feedback::FeedbackPacket;
+pub use source::SourcePacket;
 
-use crate::error::{Result, DelpError};
+use crate::error::{DelpError, Result};
 
 /// Top-level Delp packet — parsed from raw bytes without copying the payload.
 #[derive(Debug)]
@@ -36,8 +36,8 @@ impl<'a> DelpPacket<'a> {
         let hdr = CommonHeader::parse(buf)?;
 
         match hdr.packet_type()? {
-            PacketType::Source   => Ok(DelpPacket::Source(SourcePacket::parse(buf)?)),
-            PacketType::Coded    => Ok(DelpPacket::Coded(CodedPacket::parse(buf)?)),
+            PacketType::Source => Ok(DelpPacket::Source(SourcePacket::parse(buf)?)),
+            PacketType::Coded => Ok(DelpPacket::Coded(CodedPacket::parse(buf)?)),
             PacketType::Feedback => Ok(DelpPacket::Feedback(FeedbackPacket::parse(buf)?)),
         }
     }

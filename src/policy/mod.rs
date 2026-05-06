@@ -1,10 +1,7 @@
 pub mod defaults;
 
 pub use defaults::{
-    AnyAckPolicy, AllAckPolicy,
-    NoCongestionControl,
-    ConstantFecRate,
-    ConstantFeedbackPolicy,
+    AllAckPolicy, AnyAckPolicy, ConstantFecRate, ConstantFeedbackPolicy, NoCongestionControl,
 };
 
 use crate::wire::feedback::FeedbackPacket;
@@ -12,8 +9,8 @@ use crate::wire::feedback::FeedbackPacket;
 // ── Type aliases ──────────────────────────────────────────────────────────
 
 pub type SourceSymbolId = u32;
-pub type CodedSymbolId  = u32;
-pub type ReceiverId     = u64;
+pub type CodedSymbolId = u32;
+pub type ReceiverId = u64;
 
 // ── State snapshots (borrow-split helpers) ────────────────────────────────
 
@@ -23,24 +20,24 @@ pub type ReceiverId     = u64;
 /// simultaneously borrows its policy fields mutably.
 #[derive(Debug, Clone, Copy)]
 pub struct EncoderState<'a> {
-    pub window_size:     usize,
+    pub window_size: usize,
     pub window_capacity: usize,
-    pub next_source_id:  SourceSymbolId,
-    pub next_coded_id:   CodedSymbolId,
+    pub next_source_id: SourceSymbolId,
+    pub next_coded_id: CodedSymbolId,
     /// Last measured packet loss rate per receiver (0.0..=1.0).
-    pub loss_rate:       f64,
+    pub loss_rate: f64,
     /// Source IDs currently in the encoding window.
-    pub window_ids:      &'a [SourceSymbolId],
+    pub window_ids: &'a [SourceSymbolId],
 }
 
 /// Read-only view of decoder state passed to policy callbacks.
 #[derive(Debug, Clone, Copy)]
 pub struct DecoderState {
-    pub next_delivery_id:   SourceSymbolId,
-    pub packets_received:   u64,
-    pub loss_rate:          f64,
-    pub nb_missing_src:     u32,
-    pub nb_not_used_coded:  u32,
+    pub next_delivery_id: SourceSymbolId,
+    pub packets_received: u64,
+    pub loss_rate: f64,
+    pub nb_missing_src: u32,
+    pub nb_not_used_coded: u32,
 }
 
 // ── Per-receiver ACK tracking (shared between encoder and window policy) ──
@@ -89,9 +86,9 @@ impl ReceiverAckState {
 
     /// Returns `true` if `id` has been acknowledged by `receiver_id`.
     pub fn is_acked(&self, receiver_id: ReceiverId, id: SourceSymbolId) -> bool {
-        self.receivers.get(&receiver_id).map_or(false, |e| {
-            id < e.cumulative_ack || e.sack.contains(&id)
-        })
+        self.receivers
+            .get(&receiver_id)
+            .is_some_and(|e| id < e.cumulative_ack || e.sack.contains(&id))
     }
 
     /// All known receiver IDs.
@@ -99,7 +96,9 @@ impl ReceiverAckState {
         self.receivers.keys().copied()
     }
 
-    pub fn num_receivers(&self) -> usize { self.receivers.len() }
+    pub fn num_receivers(&self) -> usize {
+        self.receivers.len()
+    }
 }
 
 // ── WindowPolicy ──────────────────────────────────────────────────────────
@@ -111,8 +110,8 @@ impl ReceiverAckState {
 pub trait WindowPolicy: Send + 'static {
     fn symbols_to_remove(
         &mut self,
-        ack_state:       &ReceiverAckState,
-        window_ids:      &[SourceSymbolId],
+        ack_state: &ReceiverAckState,
+        window_ids: &[SourceSymbolId],
     ) -> Vec<SourceSymbolId>;
 }
 
@@ -128,8 +127,13 @@ pub trait CongestionControl: Send + 'static {
     /// Process received CCI bytes from a feedback packet.
     fn process_cci(&mut self, cci: &[u8]);
     /// Called when a feedback packet is received with loss statistics.
-    fn on_feedback(&mut self, state: EncoderState<'_>, loss_rate: f64,
-                   nb_missing: u32, nb_unused_coded: u32);
+    fn on_feedback(
+        &mut self,
+        state: EncoderState<'_>,
+        loss_rate: f64,
+        nb_missing: u32,
+        nb_unused_coded: u32,
+    );
     /// Returns `true` when the CC algorithm permits sending a new packet.
     fn can_send(&self) -> bool;
     /// Notify the CC algorithm that a packet of `size` bytes was just sent.
@@ -144,18 +148,15 @@ pub trait FecRateController: Send + 'static {
     ///
     /// Returns the number of coded packets the encoder should generate
     /// immediately.  Returning 0 suppresses coded output for this symbol.
-    fn coded_packets_to_generate(
-        &mut self,
-        state:    EncoderState<'_>,
-    ) -> usize;
+    fn coded_packets_to_generate(&mut self, state: EncoderState<'_>) -> usize;
 
     /// Called when a feedback packet is received.
     fn on_feedback(
         &mut self,
-        state:         EncoderState<'_>,
-        loss_rate:     f64,
-        nb_missing:    u32,
-        nb_unused:     u32,
+        state: EncoderState<'_>,
+        loss_rate: f64,
+        nb_missing: u32,
+        nb_unused: u32,
     );
 }
 

@@ -1,6 +1,6 @@
 use super::{
-    WindowPolicy, CongestionControl, FecRateController, FeedbackPolicy,
-    ReceiverAckState, SourceSymbolId, EncoderState, DecoderState,
+    CongestionControl, DecoderState, EncoderState, FecRateController, FeedbackPolicy,
+    ReceiverAckState, SourceSymbolId, WindowPolicy,
 };
 
 // ── WindowPolicy implementations ─────────────────────────────────────────
@@ -15,12 +15,18 @@ pub struct AnyAckPolicy;
 impl WindowPolicy for AnyAckPolicy {
     fn symbols_to_remove(
         &mut self,
-        ack_state:  &ReceiverAckState,
+        ack_state: &ReceiverAckState,
         window_ids: &[SourceSymbolId],
     ) -> Vec<SourceSymbolId> {
-        window_ids.iter().filter(|&&id| {
-            ack_state.receiver_ids().any(|rid| ack_state.is_acked(rid, id))
-        }).copied().collect()
+        window_ids
+            .iter()
+            .filter(|&&id| {
+                ack_state
+                    .receiver_ids()
+                    .any(|rid| ack_state.is_acked(rid, id))
+            })
+            .copied()
+            .collect()
     }
 }
 
@@ -34,13 +40,21 @@ pub struct AllAckPolicy;
 impl WindowPolicy for AllAckPolicy {
     fn symbols_to_remove(
         &mut self,
-        ack_state:  &ReceiverAckState,
+        ack_state: &ReceiverAckState,
         window_ids: &[SourceSymbolId],
     ) -> Vec<SourceSymbolId> {
-        if ack_state.num_receivers() == 0 { return Vec::new(); }
-        window_ids.iter().filter(|&&id| {
-            ack_state.receiver_ids().all(|rid| ack_state.is_acked(rid, id))
-        }).copied().collect()
+        if ack_state.num_receivers() == 0 {
+            return Vec::new();
+        }
+        window_ids
+            .iter()
+            .filter(|&&id| {
+                ack_state
+                    .receiver_ids()
+                    .all(|rid| ack_state.is_acked(rid, id))
+            })
+            .copied()
+            .collect()
     }
 }
 
@@ -52,21 +66,28 @@ pub struct QuorumAckPolicy {
 }
 
 impl QuorumAckPolicy {
-    pub fn new(quorum: usize) -> Self { Self { quorum } }
+    pub fn new(quorum: usize) -> Self {
+        Self { quorum }
+    }
 }
 
 impl WindowPolicy for QuorumAckPolicy {
     fn symbols_to_remove(
         &mut self,
-        ack_state:  &ReceiverAckState,
+        ack_state: &ReceiverAckState,
         window_ids: &[SourceSymbolId],
     ) -> Vec<SourceSymbolId> {
-        window_ids.iter().filter(|&&id| {
-            let acked_count = ack_state.receiver_ids()
-                .filter(|&rid| ack_state.is_acked(rid, id))
-                .count();
-            acked_count >= self.quorum
-        }).copied().collect()
+        window_ids
+            .iter()
+            .filter(|&&id| {
+                let acked_count = ack_state
+                    .receiver_ids()
+                    .filter(|&rid| ack_state.is_acked(rid, id))
+                    .count();
+                acked_count >= self.quorum
+            })
+            .copied()
+            .collect()
     }
 }
 
@@ -80,11 +101,15 @@ impl WindowPolicy for QuorumAckPolicy {
 pub struct NoCongestionControl;
 
 impl CongestionControl for NoCongestionControl {
-    fn generate_cci(&self)                              -> &[u8] { &[] }
-    fn process_cci(&mut self, _cci: &[u8])              {}
+    fn generate_cci(&self) -> &[u8] {
+        &[]
+    }
+    fn process_cci(&mut self, _cci: &[u8]) {}
     fn on_feedback(&mut self, _: EncoderState<'_>, _: f64, _: u32, _: u32) {}
-    fn can_send(&self)                                  -> bool { true }
-    fn on_send(&mut self, _size: usize)                 {}
+    fn can_send(&self) -> bool {
+        true
+    }
+    fn on_send(&mut self, _size: usize) {}
 }
 
 // ── FecRateController implementations ────────────────────────────────────
@@ -94,24 +119,32 @@ impl CongestionControl for NoCongestionControl {
 /// Example: `ConstantFecRate::new(1, 4)` → 25 % overhead (1 coded per 4 source).
 #[derive(Debug, Clone)]
 pub struct ConstantFecRate {
-    numer:   usize,
-    denom:   usize,
+    numer: usize,
+    denom: usize,
     /// Running numerator accumulator.
-    acc:     usize,
+    acc: usize,
 }
 
 impl ConstantFecRate {
     /// Create a rate controller emitting `numer` coded packets per `denom` source packets.
     pub fn new(numer: usize, denom: usize) -> Self {
         assert!(denom > 0, "denom must be ≥ 1");
-        Self { numer, denom, acc: 0 }
+        Self {
+            numer,
+            denom,
+            acc: 0,
+        }
     }
 
     /// 1:1 ratio — one coded packet for every source packet.
-    pub fn one_to_one() -> Self { Self::new(1, 1) }
+    pub fn one_to_one() -> Self {
+        Self::new(1, 1)
+    }
 
     /// No coded packets emitted at all (FEC disabled).
-    pub fn disabled() -> Self { Self::new(0, 1) }
+    pub fn disabled() -> Self {
+        Self::new(0, 1)
+    }
 }
 
 impl FecRateController for ConstantFecRate {
@@ -133,11 +166,11 @@ impl FecRateController for ConstantFecRate {
 pub struct AdaptiveFecRate {
     /// Baseline FEC rate (coded per source).
     current_rate: f64,
-    min_rate:     f64,
-    max_rate:     f64,
-    target_loss:  f64,
+    min_rate: f64,
+    max_rate: f64,
+    target_loss: f64,
     /// Fractional accumulator for fractional rates.
-    acc:          f64,
+    acc: f64,
 }
 
 impl AdaptiveFecRate {
@@ -162,9 +195,9 @@ impl FecRateController for AdaptiveFecRate {
 
     fn on_feedback(
         &mut self,
-        _state:     EncoderState<'_>,
-        loss_rate:  f64,
-        _nb_miss:   u32,
+        _state: EncoderState<'_>,
+        loss_rate: f64,
+        _nb_miss: u32,
         _nb_unused: u32,
     ) {
         if loss_rate > self.target_loss {
@@ -180,7 +213,7 @@ impl FecRateController for AdaptiveFecRate {
 /// Emit one feedback packet every `period` received packets.
 #[derive(Debug, Clone)]
 pub struct ConstantFeedbackPolicy {
-    period:  u32,
+    period: u32,
     counter: u32,
 }
 
@@ -209,7 +242,9 @@ impl FeedbackPolicy for ConstantFeedbackPolicy {
 pub struct ImmediateFeedbackPolicy;
 
 impl FeedbackPolicy for ImmediateFeedbackPolicy {
-    fn should_send_feedback(&mut self, _state: DecoderState) -> bool { true }
+    fn should_send_feedback(&mut self, _state: DecoderState) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -218,12 +253,12 @@ mod tests {
 
     fn dummy_state() -> EncoderState<'static> {
         EncoderState {
-            window_size:     4,
+            window_size: 4,
             window_capacity: 256,
-            next_source_id:  10,
-            next_coded_id:   3,
-            loss_rate:       0.0,
-            window_ids:      &[],
+            next_source_id: 10,
+            next_coded_id: 3,
+            loss_rate: 0.0,
+            window_ids: &[],
         }
     }
 
@@ -238,7 +273,9 @@ mod tests {
     #[test]
     fn constant_fec_rate_one_in_four() {
         let mut ctrl = ConstantFecRate::new(1, 4);
-        let counts: Vec<usize> = (0..8).map(|_| ctrl.coded_packets_to_generate(dummy_state())).collect();
+        let counts: Vec<usize> = (0..8)
+            .map(|_| ctrl.coded_packets_to_generate(dummy_state()))
+            .collect();
         // Expect 1 coded per 4 source on average
         assert_eq!(counts.iter().sum::<usize>(), 2); // 8 / 4 = 2
     }
@@ -262,13 +299,13 @@ mod tests {
     #[test]
     fn any_ack_policy_removes_on_first_ack() {
         use crate::wire::feedback::FeedbackPacket;
-        let mut state  = ReceiverAckState::default();
-        let acked       = vec![10u32, 11, 12];
-        let pkt         = FeedbackPacket::build(10, 0, 0, 0.0, &acked);
+        let mut state = ReceiverAckState::default();
+        let acked = vec![10u32, 11, 12];
+        let pkt = FeedbackPacket::build(10, 0, 0, 0.0, &acked);
         state.update(1, &pkt);
-        let mut policy  = AnyAckPolicy;
+        let mut policy = AnyAckPolicy;
         let window: Vec<u32> = (10..15).collect();
-        let to_remove   = policy.symbols_to_remove(&state, &window);
+        let to_remove = policy.symbols_to_remove(&state, &window);
         assert!(to_remove.contains(&10));
         assert!(to_remove.contains(&11));
         assert!(to_remove.contains(&12));
@@ -278,15 +315,15 @@ mod tests {
     #[test]
     fn all_ack_policy_requires_all_receivers() {
         use crate::wire::feedback::FeedbackPacket;
-        let mut state    = ReceiverAckState::default();
-        let pkt1         = FeedbackPacket::build(10, 0, 0, 0.0, &[10, 11]);
-        let pkt2         = FeedbackPacket::build(10, 0, 0, 0.0, &[10]);
+        let mut state = ReceiverAckState::default();
+        let pkt1 = FeedbackPacket::build(10, 0, 0, 0.0, &[10, 11]);
+        let pkt2 = FeedbackPacket::build(10, 0, 0, 0.0, &[10]);
         state.update(1, &pkt1);
         state.update(2, &pkt2);
-        let mut policy   = AllAckPolicy;
+        let mut policy = AllAckPolicy;
         let window: Vec<u32> = (10..13).collect();
-        let to_remove    = policy.symbols_to_remove(&state, &window);
-        assert!( to_remove.contains(&10)); // acked by both
+        let to_remove = policy.symbols_to_remove(&state, &window);
+        assert!(to_remove.contains(&10)); // acked by both
         assert!(!to_remove.contains(&11)); // only receiver 1
         assert!(!to_remove.contains(&12)); // neither
     }

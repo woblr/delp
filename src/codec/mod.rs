@@ -1,5 +1,5 @@
-pub mod encoder;
 pub mod decoder;
+pub mod encoder;
 
-pub use encoder::{Encoder, DefaultEncoder, EncoderOutput};
-pub use decoder::{Decoder, DefaultDecoder, DecoderEvent};
+pub use decoder::{Decoder, DecoderEvent, DefaultDecoder};
+pub use encoder::{DefaultEncoder, Encoder, EncoderOutput};

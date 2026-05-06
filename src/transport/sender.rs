@@ -37,13 +37,13 @@ where
     C: CongestionControl,
     F: FecRateController,
 {
-    encoder:     Encoder<W, C, F>,
-    socket:      Arc<UdpSocket>,
-    remote:      SocketAddr,
+    encoder: Encoder<W, C, F>,
+    socket: Arc<UdpSocket>,
+    remote: SocketAddr,
     /// Stable receiver ID derived from the remote address.
     receiver_id: ReceiverId,
     /// Temporary receive buffer — reused across [`recv_feedback`] calls.
-    rx_buf:      Vec<u8>,
+    rx_buf: Vec<u8>,
 }
 
 impl<W, C, F> FecSender<W, C, F>
@@ -88,7 +88,7 @@ where
         for pkt in packets {
             let raw = match pkt {
                 EncoderOutput::Source(b) => b,
-                EncoderOutput::Coded(b)  => b,
+                EncoderOutput::Coded(b) => b,
             };
             self.socket.send_to(&raw, self.remote).await?;
         }
@@ -154,11 +154,21 @@ where
 
     // ── Accessors ─────────────────────────────────────────────────────────
 
-    pub fn encoder(&self)     -> &Encoder<W, C, F>     { &self.encoder }
-    pub fn encoder_mut(&mut self) -> &mut Encoder<W, C, F> { &mut self.encoder }
-    pub fn socket(&self)      -> &Arc<UdpSocket>        { &self.socket }
-    pub fn remote(&self)      -> SocketAddr              { self.remote }
-    pub fn receiver_id(&self) -> ReceiverId              { self.receiver_id }
+    pub fn encoder(&self) -> &Encoder<W, C, F> {
+        &self.encoder
+    }
+    pub fn encoder_mut(&mut self) -> &mut Encoder<W, C, F> {
+        &mut self.encoder
+    }
+    pub fn socket(&self) -> &Arc<UdpSocket> {
+        &self.socket
+    }
+    pub fn remote(&self) -> SocketAddr {
+        self.remote
+    }
+    pub fn receiver_id(&self) -> ReceiverId {
+        self.receiver_id
+    }
 }
 
 // ── futures_sink::Sink<Bytes> ─────────────────────────────────────────────
@@ -181,7 +191,7 @@ where
     C: CongestionControl,
     F: FecRateController,
 {
-    inner:   FecSender<W, C, F>,
+    inner: FecSender<W, C, F>,
     pending: VecDeque<Vec<u8>>,
 }
 
@@ -193,12 +203,14 @@ where
 {
     pub fn new(encoder: Encoder<W, C, F>, socket: Arc<UdpSocket>, remote: SocketAddr) -> Self {
         Self {
-            inner:   FecSender::new(encoder, socket, remote),
+            inner: FecSender::new(encoder, socket, remote),
             pending: VecDeque::new(),
         }
     }
 
-    pub fn into_inner(self) -> FecSender<W, C, F> { self.inner }
+    pub fn into_inner(self) -> FecSender<W, C, F> {
+        self.inner
+    }
 }
 
 impl<W, C, F> futures_sink::Sink<Bytes> for SinkSender<W, C, F>
@@ -225,7 +237,7 @@ where
         for pkt in packets {
             let raw = match pkt {
                 EncoderOutput::Source(b) => b,
-                EncoderOutput::Coded(b)  => b,
+                EncoderOutput::Coded(b) => b,
             };
             self.pending.push_back(raw);
         }
@@ -236,7 +248,9 @@ where
         let remote = self.inner.remote;
         while let Some(pkt) = self.pending.front() {
             match self.inner.socket.try_send_to(pkt, remote) {
-                Ok(_) => { self.pending.pop_front(); }
+                Ok(_) => {
+                    self.pending.pop_front();
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // Socket not ready — register waker and retry later.
                     let sock = Arc::clone(&self.inner.socket);
@@ -265,8 +279,8 @@ where
 /// Simple multiplicative hash — not cryptographic, purely for in-process
 /// demultiplexing of feedback packets from multiple receivers.
 fn addr_to_receiver_id(addr: SocketAddr) -> ReceiverId {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
     addr.hash(&mut h);
     h.finish()

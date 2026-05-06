@@ -24,12 +24,12 @@
 //!
 //! See `examples/udp_fec.rs` for a complete working example.
 
-pub mod sender;
 pub mod receiver;
+pub mod sender;
 pub mod session;
 
-pub use sender::FecSender;
 pub use receiver::FecReceiver;
+pub use sender::FecSender;
 pub use session::DelpSession;
 
 // ── Transport error ───────────────────────────────────────────────────────

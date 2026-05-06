@@ -1,6 +1,6 @@
+use crate::policy::SourceSymbolId;
 use bytes::Bytes;
 use std::collections::BTreeMap;
-use crate::policy::SourceSymbolId;
 
 /// In-order symbol delivery buffer for the decoder.
 ///
@@ -17,8 +17,8 @@ pub struct SymbolBuffer {
 impl SymbolBuffer {
     pub fn new(start_id: SourceSymbolId) -> Self {
         Self {
-            symbols:           BTreeMap::new(),
-            next_delivery_id:  start_id,
+            symbols: BTreeMap::new(),
+            next_delivery_id: start_id,
         }
     }
 
@@ -53,14 +53,9 @@ impl SymbolBuffer {
     /// Advances `next_delivery_id` past every delivered symbol.
     pub fn drain_deliverable(&mut self) -> Vec<(SourceSymbolId, Bytes)> {
         let mut out = Vec::new();
-        loop {
-            match self.symbols.remove(&self.next_delivery_id) {
-                Some(data) => {
-                    out.push((self.next_delivery_id, data));
-                    self.next_delivery_id = self.next_delivery_id.wrapping_add(1);
-                }
-                None => break,
-            }
+        while let Some(data) = self.symbols.remove(&self.next_delivery_id) {
+            out.push((self.next_delivery_id, data));
+            self.next_delivery_id = self.next_delivery_id.wrapping_add(1);
         }
         out
     }
@@ -84,15 +79,21 @@ impl SymbolBuffer {
         self.symbols.range(from..).map(|(&id, _)| id)
     }
 
-    pub fn len(&self)      -> usize { self.symbols.len() }
-    pub fn is_empty(&self) -> bool  { self.symbols.is_empty() }
+    pub fn len(&self) -> usize {
+        self.symbols.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.symbols.is_empty()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn bytes(v: u8) -> Bytes { Bytes::from(vec![v; 4]) }
+    fn bytes(v: u8) -> Bytes {
+        Bytes::from(vec![v; 4])
+    }
 
     #[test]
     fn in_order_delivery() {

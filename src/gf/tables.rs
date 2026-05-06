@@ -1,7 +1,7 @@
-/// Compile-time log/exp table generation for GF(2^n).
-///
-/// All functions are `const fn` so the tables live in the binary's `.rodata`
-/// section — no runtime heap allocation, no `OnceLock`.
+//! Compile-time log/exp table generation for GF(2^n).
+//!
+//! All functions are `const fn` so the tables live in the binary's `.rodata`
+//! section — no runtime heap allocation, no `OnceLock`.
 
 // ── GF(2^4) — irreducible poly x^4 + x + 1 = 0b10011 = 19 ──────────────
 

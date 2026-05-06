@@ -1,4 +1,7 @@
-use super::{Field, tables::{GF2_8_EXP, GF2_8_LOG, GF2_8_ORDER}};
+use super::{
+    tables::{GF2_8_EXP, GF2_8_LOG, GF2_8_ORDER},
+    Field,
+};
 
 /// An element of GF(2⁸).
 ///
@@ -10,37 +13,50 @@ pub struct Gf2_8(u8);
 
 impl Gf2_8 {
     #[inline(always)]
-    pub const fn new(v: u8) -> Self { Self(v) }
+    pub const fn new(v: u8) -> Self {
+        Self(v)
+    }
 
     #[inline(always)]
-    pub const fn value(self) -> u8 { self.0 }
+    pub const fn value(self) -> u8 {
+        self.0
+    }
 }
 
 #[inline(always)]
 fn gf2_8_mul_raw(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 { return 0; }
+    if a == 0 || b == 0 {
+        return 0;
+    }
     // Doubled EXP table avoids `% 255` — just index directly.
     GF2_8_EXP[GF2_8_LOG[a as usize] as usize + GF2_8_LOG[b as usize] as usize]
 }
 
 impl Field for Gf2_8 {
-    const ORDER: usize  = GF2_8_ORDER;
+    const ORDER: usize = GF2_8_ORDER;
     const COEF_BITS: u8 = 8;
-    const ZERO: Self    = Self(0);
-    const ONE: Self     = Self(1);
+    const ZERO: Self = Self(0);
+    const ONE: Self = Self(1);
 
     #[inline(always)]
-    fn add(self, rhs: Self) -> Self { Self(self.0 ^ rhs.0) }
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 ^ rhs.0)
+    }
 
     #[inline(always)]
-    fn mul(self, rhs: Self) -> Self { Self(gf2_8_mul_raw(self.0, rhs.0)) }
+    fn mul(self, rhs: Self) -> Self {
+        Self(gf2_8_mul_raw(self.0, rhs.0))
+    }
 
     #[inline(always)]
     fn inv(self) -> Self {
         // Inversion of zero is undefined in any field.  We assert in both
         // debug and release: a wrong inverse would silently corrupt all
         // downstream recovery, which is far harder to diagnose than a panic.
-        assert_ne!(self.0, 0, "GF(2^8): inversion of the zero element is undefined");
+        assert_ne!(
+            self.0, 0,
+            "GF(2^8): inversion of the zero element is undefined"
+        );
         // inv(a) = alpha^(255 - log(a)); the doubled EXP table keeps the
         // index in [1..255] — LOG[0] = 0xFF guards the sentinel.
         let log_a = GF2_8_LOG[self.0 as usize] as usize;
@@ -54,10 +70,14 @@ impl Field for Gf2_8 {
     }
 
     #[inline(always)]
-    fn from_u8(v: u8) -> Self { Self(v) }
+    fn from_u8(v: u8) -> Self {
+        Self(v)
+    }
 
     #[inline(always)]
-    fn to_u8(self) -> u8 { self.0 }
+    fn to_u8(self) -> u8 {
+        self.0
+    }
 }
 
 #[cfg(test)]

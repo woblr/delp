@@ -19,8 +19,8 @@ use tokio::net::UdpSocket;
 
 use crate::codec::decoder::{Decoder, DecoderEvent};
 use crate::policy::{FeedbackPolicy, SourceSymbolId};
-use crate::wire::common::{CommonHeader, PacketType};
 use crate::wire::coded::CodedPacket;
+use crate::wire::common::{CommonHeader, PacketType};
 use crate::wire::source::SourcePacket;
 
 use super::{TransportError, TransportResult};
@@ -34,13 +34,13 @@ use super::{TransportError, TransportResult};
 /// - `P` — [`FeedbackPolicy`]: controls when window-update packets are sent
 ///   back to the encoder.
 pub struct FecReceiver<P: FeedbackPolicy> {
-    decoder:      Decoder<P>,
-    socket:       Arc<UdpSocket>,
+    decoder: Decoder<P>,
+    socket: Arc<UdpSocket>,
     encoder_addr: SocketAddr,
     /// Decoded symbols waiting to be consumed by the caller.
-    ready:        VecDeque<(SourceSymbolId, Bytes)>,
+    ready: VecDeque<(SourceSymbolId, Bytes)>,
     /// Reusable datagram receive buffer (max UDP payload = 65 507 bytes).
-    rx_buf:       Vec<u8>,
+    rx_buf: Vec<u8>,
 }
 
 impl<P: FeedbackPolicy> FecReceiver<P> {
@@ -55,7 +55,7 @@ impl<P: FeedbackPolicy> FecReceiver<P> {
             decoder,
             socket,
             encoder_addr,
-            ready:  VecDeque::new(),
+            ready: VecDeque::new(),
             rx_buf: vec![0u8; 65536],
         }
     }
@@ -74,28 +74,24 @@ impl<P: FeedbackPolicy> FecReceiver<P> {
 
         // Determine packet type from common header.
         let hdr = match CommonHeader::parse(raw) {
-            Ok(h)  => h,
+            Ok(h) => h,
             Err(_) => return Ok(false), // silently drop malformed datagrams
         };
 
         let pkt_type = match hdr.packet_type() {
-            Ok(t)  => t,
+            Ok(t) => t,
             Err(_) => return Ok(false),
         };
 
         let events = match pkt_type {
-            PacketType::Source => {
-                match SourcePacket::parse(raw) {
-                    Ok(sp) => self.decoder.handle_source(&sp)?,
-                    Err(_) => return Ok(false),
-                }
-            }
-            PacketType::Coded => {
-                match CodedPacket::parse(raw) {
-                    Ok(cp) => self.decoder.handle_coded(&cp)?,
-                    Err(_) => return Ok(false),
-                }
-            }
+            PacketType::Source => match SourcePacket::parse(raw) {
+                Ok(sp) => self.decoder.handle_source(&sp)?,
+                Err(_) => return Ok(false),
+            },
+            PacketType::Coded => match CodedPacket::parse(raw) {
+                Ok(cp) => self.decoder.handle_coded(&cp)?,
+                Err(_) => return Ok(false),
+            },
             PacketType::Feedback => {
                 // Feedback arriving at the receiver is unexpected but harmless.
                 return Ok(false);
@@ -142,13 +138,23 @@ impl<P: FeedbackPolicy> FecReceiver<P> {
 
     // ── Accessors ─────────────────────────────────────────────────────────
 
-    pub fn decoder(&self)         -> &Decoder<P>     { &self.decoder }
-    pub fn decoder_mut(&mut self) -> &mut Decoder<P> { &mut self.decoder }
-    pub fn socket(&self)          -> &Arc<UdpSocket> { &self.socket }
-    pub fn encoder_addr(&self)    -> SocketAddr       { self.encoder_addr }
+    pub fn decoder(&self) -> &Decoder<P> {
+        &self.decoder
+    }
+    pub fn decoder_mut(&mut self) -> &mut Decoder<P> {
+        &mut self.decoder
+    }
+    pub fn socket(&self) -> &Arc<UdpSocket> {
+        &self.socket
+    }
+    pub fn encoder_addr(&self) -> SocketAddr {
+        self.encoder_addr
+    }
 
     /// How many decoded symbols are queued and waiting for the caller.
-    pub fn ready_count(&self) -> usize { self.ready.len() }
+    pub fn ready_count(&self) -> usize {
+        self.ready.len()
+    }
 }
 
 // ── futures_core::Stream ──────────────────────────────────────────────────
@@ -203,27 +209,28 @@ impl<P: FeedbackPolicy> FecReceiver<P> {
     ///
     /// Feedback is queued and sent lazily; in the Stream path we fire-and-forget
     /// via `try_send_to` rather than `.await`-ing.
-    fn dispatch_datagram(&mut self, raw: &[u8]) -> TransportResult<Option<(SourceSymbolId, Bytes)>> {
+    fn dispatch_datagram(
+        &mut self,
+        raw: &[u8],
+    ) -> TransportResult<Option<(SourceSymbolId, Bytes)>> {
         let hdr = match CommonHeader::parse(raw) {
-            Ok(h) => h, Err(_) => return Ok(None),
+            Ok(h) => h,
+            Err(_) => return Ok(None),
         };
         let pkt_type = match hdr.packet_type() {
-            Ok(t) => t, Err(_) => return Ok(None),
+            Ok(t) => t,
+            Err(_) => return Ok(None),
         };
 
         let events = match pkt_type {
-            PacketType::Source => {
-                match SourcePacket::parse(raw) {
-                    Ok(sp) => self.decoder.handle_source(&sp)?,
-                    Err(_) => return Ok(None),
-                }
-            }
-            PacketType::Coded => {
-                match CodedPacket::parse(raw) {
-                    Ok(cp) => self.decoder.handle_coded(&cp)?,
-                    Err(_) => return Ok(None),
-                }
-            }
+            PacketType::Source => match SourcePacket::parse(raw) {
+                Ok(sp) => self.decoder.handle_source(&sp)?,
+                Err(_) => return Ok(None),
+            },
+            PacketType::Coded => match CodedPacket::parse(raw) {
+                Ok(cp) => self.decoder.handle_coded(&cp)?,
+                Err(_) => return Ok(None),
+            },
             PacketType::Feedback => return Ok(None),
         };
 

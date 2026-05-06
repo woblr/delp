@@ -1,0 +1,21 @@
+[package]
+name        = "delp-cli"
+version     = "1.0.0"
+edition     = "2021"
+rust-version = "1.82"
+license     = "Apache-2.0"
+description = "CLI tools for delp — file transfer over lossy UDP, throughput benchmarks, and live demos of delp's ALTC and Generation-Rotation extensions."
+
+[[bin]]
+name = "delp"
+path = "src/main.rs"
+
+[dependencies]
+delp        = { path = "..", version = "1", features = ["async"] }
+bytes       = "1"
+clap        = { version = "4", features = ["derive"] }
+tokio       = { version = "1", features = ["full"] }
+anyhow      = "1"
+sha2        = "0.10"
+indicatif   = "0.17"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

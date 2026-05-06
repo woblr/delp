@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
-use bytes::Bytes;
 use crate::policy::SourceSymbolId;
+use bytes::Bytes;
+use std::collections::VecDeque;
 
 /// One entry in the encoding window.
 #[derive(Debug, Clone)]
 pub struct WindowSymbol {
-    pub id:   SourceSymbolId,
+    pub id: SourceSymbolId,
     pub data: Bytes,
 }
 
@@ -16,8 +16,8 @@ pub struct WindowSymbol {
 /// the bandwidth-optimal `IdStorageFormat::None` wire encoding.
 #[derive(Debug)]
 pub struct EncodingWindow {
-    symbols:    VecDeque<WindowSymbol>,
-    capacity:   usize,
+    symbols: VecDeque<WindowSymbol>,
+    capacity: usize,
     /// ID that will be assigned to the next submitted symbol.
     pub(crate) next_id: SourceSymbolId,
     /// True when all IDs in the window form a contiguous range.
@@ -27,18 +27,24 @@ pub struct EncodingWindow {
 impl EncodingWindow {
     pub fn new(capacity: usize) -> Self {
         Self {
-            symbols:       VecDeque::with_capacity(capacity.min(256)),
+            symbols: VecDeque::with_capacity(capacity.min(256)),
             capacity,
-            next_id:       0,
+            next_id: 0,
             is_contiguous: true,
         }
     }
 
     // ── Accessors ────────────────────────────────────────────────────────
 
-    pub fn len(&self)      -> usize { self.symbols.len() }
-    pub fn is_empty(&self) -> bool  { self.symbols.is_empty() }
-    pub fn is_full(&self)  -> bool  { self.symbols.len() >= self.capacity }
+    pub fn len(&self) -> usize {
+        self.symbols.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.symbols.is_empty()
+    }
+    pub fn is_full(&self) -> bool {
+        self.symbols.len() >= self.capacity
+    }
 
     pub fn first_id(&self) -> Option<SourceSymbolId> {
         self.symbols.front().map(|s| s.id)
@@ -49,7 +55,9 @@ impl EncodingWindow {
     }
 
     /// Return a slice of all (id, data) pairs — used for coded-packet generation.
-    pub fn symbols(&self) -> &VecDeque<WindowSymbol> { &self.symbols }
+    pub fn symbols(&self) -> &VecDeque<WindowSymbol> {
+        &self.symbols
+    }
 
     /// Return a sorted `Vec` of all current source IDs — used by policy callbacks.
     pub fn id_slice(&self) -> Vec<SourceSymbolId> {
@@ -87,10 +95,11 @@ impl EncodingWindow {
     ///
     /// After removal the window may no longer be contiguous.
     pub fn remove_ids(&mut self, ids: &[SourceSymbolId]) {
-        if ids.is_empty() { return; }
+        if ids.is_empty() {
+            return;
+        }
 
-        let id_set: std::collections::HashSet<SourceSymbolId> =
-            ids.iter().copied().collect();
+        let id_set: std::collections::HashSet<SourceSymbolId> = ids.iter().copied().collect();
 
         let before_len = self.symbols.len();
         self.symbols.retain(|s| !id_set.contains(&s.id));
@@ -107,11 +116,15 @@ impl EncodingWindow {
     /// O(1) if the window is contiguous (index by offset from front ID);
     /// O(n) scan for non-contiguous windows (rare).
     pub fn get(&self, id: SourceSymbolId) -> Option<&Bytes> {
-        if self.is_empty() { return None; }
+        if self.is_empty() {
+            return None;
+        }
 
         if self.is_contiguous {
             let front = self.symbols.front().unwrap().id;
-            if id < front { return None; }
+            if id < front {
+                return None;
+            }
             let idx = (id - front) as usize;
             self.symbols.get(idx).map(|s| &s.data)
         } else {
@@ -121,7 +134,9 @@ impl EncodingWindow {
 }
 
 fn check_contiguous(symbols: &VecDeque<WindowSymbol>) -> bool {
-    symbols.iter().zip(symbols.iter().skip(1))
+    symbols
+        .iter()
+        .zip(symbols.iter().skip(1))
         .all(|(a, b)| b.id == a.id.wrapping_add(1))
 }
 
@@ -129,7 +144,9 @@ fn check_contiguous(symbols: &VecDeque<WindowSymbol>) -> bool {
 mod tests {
     use super::*;
 
-    fn make_bytes(v: u8) -> Bytes { Bytes::from(vec![v; 8]) }
+    fn make_bytes(v: u8) -> Bytes {
+        Bytes::from(vec![v; 8])
+    }
 
     #[test]
     fn push_and_get() {
@@ -145,7 +162,9 @@ mod tests {
     #[test]
     fn contiguous_flag_cleared_on_mid_removal() {
         let mut w = EncodingWindow::new(8);
-        for i in 0..6u8 { w.push(make_bytes(i)); }
+        for i in 0..6u8 {
+            w.push(make_bytes(i));
+        }
         assert!(w.is_contiguous);
         w.remove_ids(&[2, 4]);
         assert!(!w.is_contiguous);
@@ -154,7 +173,9 @@ mod tests {
     #[test]
     fn evict_oldest_maintains_contiguity() {
         let mut w = EncodingWindow::new(4);
-        for i in 0..4u8 { w.push(make_bytes(i)); }
+        for i in 0..4u8 {
+            w.push(make_bytes(i));
+        }
         w.evict_oldest();
         assert!(w.is_contiguous);
         assert_eq!(w.first_id(), Some(1));
@@ -163,7 +184,9 @@ mod tests {
     #[test]
     fn capacity_enforcement() {
         let mut w = EncodingWindow::new(3);
-        for i in 0..3u8 { w.push(make_bytes(i)); }
+        for i in 0..3u8 {
+            w.push(make_bytes(i));
+        }
         assert!(w.is_full());
     }
 }
