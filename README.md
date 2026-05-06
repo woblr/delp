@@ -18,8 +18,6 @@ delp = { version = "1", features = ["async"] }
 
 Standard block codes commit to a code rate up front and incur full decoder
 latency before any source symbol becomes available.  Sliding-window codes
-(RFC 9407 / Tetrys) emit each source packet immediately *and* a small
-fraction of coded packets; the decoder recovers losses on the fly without
 retransmissions.  This keeps tail latency low on lossy links — wireless,
 satellite, real-time media — where retransmits are expensive or impossible.
 
@@ -48,7 +46,7 @@ satellite, real-time media — where retransmits are expensive or impossible.
 - **Backpressure flow control** — `BackpressureMode::Reject` returns
   `Err(WindowFull)` instead of evicting unacknowledged symbols.
 
-### What's novel — beyond RFC 9407 / Tetrys
+### What's novel
 
 Two delp-specific extensions that other sliding-window FEC libraries don't
 implement:
@@ -178,6 +176,43 @@ tokio::spawn(async move {
 cargo run --example udp_fec        --features async
 cargo run --example file_transfer  --features async --release
 ```
+
+## CLI — `delp` binary
+
+The [`delp-cli`](delp-cli/) workspace member ships a single `delp`
+binary anyone can install and use to verify the library's claims on
+their own machine.
+
+```bash
+# Install from this checkout
+cargo install --path delp-cli
+
+# Throughput benchmark
+delp bench --symbol-size 1024 --window 64 --symbols 10000
+
+# Live wire-size proof of ALTC vs full-window coding
+delp demo altc --window 32 --cover 8
+
+# Drive a Cauchy session past the RFC 9407 128-packet cap
+delp demo generation --symbols 12 --coded 1200
+
+# File transfer over UDP with 10 % simulated loss
+#   Terminal 1:
+delp recv --bind 127.0.0.1:9000 --output received.bin
+#   Terminal 2:
+delp send --file input.bin --dest 127.0.0.1:9000 --loss-rate 0.1
+
+# Same transfer with 30 % loss + ALTC recent-loss prioritisation
+delp send --file input.bin --dest 127.0.0.1:9000 \
+          --loss-rate 0.30 --altc recent --altc-recent 8
+
+# Cauchy session that survives the original 128-packet limit
+delp send --file input.bin --dest 127.0.0.1:9000 \
+          --strategy cauchy --window 32 --loss-rate 0.2
+```
+
+The receiver verifies the SHA-256 digest declared in the START frame
+before writing the output, so a successful run is byte-exact recovery.
 
 ## Matrix strategies
 

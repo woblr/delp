@@ -107,13 +107,15 @@ impl VandermondeRow {
 /// coded_id within its generation).
 #[inline]
 pub fn cauchy_coef_gf2_8(src_id: u32, coded_id: u32, generation: u8) -> u8 {
-    debug_assert!(src_id < 128, "Cauchy: src_id must be < 128, got {src_id}");
     debug_assert!(
         coded_id < 128,
         "Cauchy: coded_id must be < 128, got {coded_id}"
     );
+    // `src_id` may be any u32 — the encoder builder caps
+    // `window_capacity ≤ 128`, so taking `src_id mod 128` for the
+    // x-coordinate cannot collide within the active window.
     use crate::gf::{Field as GfField, Gf2_8};
-    let x = src_id as u8;
+    let x = (src_id & 0x7F) as u8;
     let y_offset = (coded_id + (generation as u32) * 7) & 0x7F;
     let y = 128u8 + y_offset as u8;
     let denom = Gf2_8::from_u8(x ^ y);
@@ -139,20 +141,17 @@ pub fn cauchy_batch_gf2_8(source_ids: &[u32], coded_id: u32, generation: u8) -> 
 
 /// Cauchy coefficient for GF(2⁴) with generation rotation.
 ///
-/// `src_id` must be < 7, `coded_id` must be < 7.
-/// `generation` rotates the y-point set (modulo 7).
+/// `coded_id` must be < 7.  `src_id` may be any `u32`; the x-coordinate
+/// is `src_id mod 7`.  Window capacity ≤ 7 (builder-enforced) prevents
+/// modulus collisions within an active window.
 #[inline]
 pub fn cauchy_coef_gf2_4(src_id: u32, coded_id: u32, generation: u8) -> u8 {
-    debug_assert!(
-        src_id < 7,
-        "GF(2^4) Cauchy: src_id must be < 7, got {src_id}"
-    );
     debug_assert!(
         coded_id < 7,
         "GF(2^4) Cauchy: coded_id must be < 7, got {coded_id}"
     );
     use crate::gf::{Field as GfField, Gf2_4};
-    let x = src_id as u8;
+    let x = (src_id % 7) as u8;
     let y_offset = ((coded_id + (generation as u32) * 3) % 7) as u8;
     let y = 8u8 + y_offset;
     let denom = Gf2_4::from_u8(x ^ y);
